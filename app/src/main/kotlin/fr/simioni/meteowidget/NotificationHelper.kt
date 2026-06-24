@@ -11,11 +11,9 @@ import androidx.core.app.NotificationCompat
 object NotificationHelper {
     const val CHANNEL_SCAN = "ble_scan"
     const val CHANNEL_ALERT = "temp_alert"
-    const val CHANNEL_DEBUG = "debug"
 
     const val NOTIF_SCAN_ID = 1
     const val NOTIF_ALERT_ID = 2
-    const val NOTIF_DEBUG_ID = 3
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -24,9 +22,6 @@ object NotificationHelper {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERT, "Alertes température", NotificationManager.IMPORTANCE_DEFAULT)
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_DEBUG, "Debug", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -45,30 +40,19 @@ object NotificationHelper {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val msg = if (openWindows)
-            "Ouvrir les fenêtres : %.1f°C dehors, %.1f°C dedans".format(outdoor, indoor)
+        val title = if (openWindows) "Ouvrir les fenêtres" else "Fermer les fenêtres"
+        val body = "%.1f°C dehors · %.1f°C dedans".format(outdoor, indoor)
+        val icon = if (openWindows)
+            android.R.drawable.arrow_up_float
         else
-            "Fermer les fenêtres : %.1f°C dehors, %.1f°C dedans".format(outdoor, indoor)
+            android.R.drawable.arrow_down_float
 
         nm.notify(NOTIF_ALERT_ID,
             NotificationCompat.Builder(context, CHANNEL_ALERT)
-                .setContentTitle("Meteo Widget")
-                .setContentText(msg)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setSmallIcon(icon)
                 .setContentIntent(pi)
-                .setAutoCancel(true)
-                .build()
-        )
-    }
-
-    fun showDebug(context: Context, msg: String) {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_DEBUG_ID,
-            NotificationCompat.Builder(context, CHANNEL_DEBUG)
-                .setContentTitle("Debug")
-                .setContentText(msg)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(msg))
-                .setSmallIcon(android.R.drawable.ic_menu_info_details)
                 .setAutoCancel(true)
                 .build()
         )

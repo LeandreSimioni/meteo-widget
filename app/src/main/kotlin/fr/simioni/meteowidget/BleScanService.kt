@@ -76,9 +76,6 @@ class BleScanService : Service() {
             log("→ Temp=%.1f°C CO2=%dppm Hum=%d%% Bat=%d%% Age=%ds".format(
                 reading.temperatureC, reading.co2Ppm, reading.humidity, reading.battery, reading.ageSec))
 
-            NotificationHelper.showDebug(this@BleScanService,
-                "Indoor: %.1f°C | CO2: %dppm | Age: %ds".format(
-                    reading.temperatureC, reading.co2Ppm, reading.ageSec))
             sendResult(reading.temperatureC)
             stopSelf()
         }
