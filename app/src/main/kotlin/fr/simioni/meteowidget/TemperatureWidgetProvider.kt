@@ -51,7 +51,6 @@ class TemperatureWidgetProvider : AppWidgetProvider() {
     override fun onEnabled(context: Context) {
         // Premier widget ajouté à l'écran d'accueil : démarre WorkManager automatiquement
         WorkScheduler.schedule(context)
-        WorkScheduler.runNow(context)
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
