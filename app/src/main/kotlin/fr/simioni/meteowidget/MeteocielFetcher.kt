@@ -26,23 +26,27 @@ object MeteocielFetcher {
 
             val rows = doc.select("table tr")
 
-            // La première ligne dont la 1ère cellule est une heure ("22h06")
-            // est le relevé le plus récent (tableau anti-chronologique)
+            // Colonnes : Heure(0) | Visi(1) | Température(2) | Humi(3) | ...
+            // Tableau anti-chronologique — on cherche la première ligne avec une heure
+            // ET une température valide (la ligne la plus récente peut avoir une cellule vide)
             val dataRow = rows.firstOrNull { row ->
                 val cells = row.select("td")
-                cells.size >= 3 && timePattern.matches(cells[0].text().trim())
+                if (cells.size < 3) return@firstOrNull false
+                val timeOk = timePattern.matches(cells[0].text().trim())
+                val tempOk = cells.getOrNull(2)?.text()
+                    ?.replace("°C", "")?.replace(",", ".")?.trim()
+                    ?.toFloatOrNull()?.let { it in -50f..60f } == true
+                timeOk && tempOk
             } ?: run {
                 Log.w(TAG, "Aucun relevé trouvé")
                 return null
             }
 
-            // Colonnes : Heure(0) | Visi(1) | Température(2) | Humi(3) | ...
-            val timeStr = dataRow.select("td")[0].text()
-            val temp = dataRow.select("td").getOrNull(2)
-                ?.text()
-                ?.replace("°C", "")?.replace(",", ".")?.trim()
-                ?.toFloatOrNull()
-                ?.takeIf { it in -50f..60f }
+            val cells = dataRow.select("td")
+            val timeStr = cells[0].text()
+            val temp = cells[2].text()
+                .replace("°C", "").replace(",", ".").trim()
+                .toFloat()
 
             Log.d(TAG, "Relevé $timeStr → $temp°C")
             temp
