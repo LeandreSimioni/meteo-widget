@@ -2,49 +2,37 @@ package fr.simioni.meteowidget
 
 import android.util.Log
 import org.jsoup.Jsoup
+import org.json.JSONObject
 
 object MeteocielFetcher {
-    private const val TAG = "MeteocielFetcher"
-    private const val URL = "https://www.meteociel.fr/temps-reel/obs_villes.php?code2=58304005"
+    private const val TAG = "OutdoorTempFetcher"
+
+    // Open-Meteo: gratuit, sans clé, mis à jour toutes les 15 min
+    // Coordonnées : Varzy, Nièvre
+    private const val LAT = 47.36
+    private const val LON = 3.39
+    private const val URL =
+        "https://api.open-meteo.com/v1/forecast?latitude=$LAT&longitude=$LON&current=temperature_2m&timezone=auto"
 
     fun fetchOutdoorTemperature(): Float? {
         return try {
-            val doc = Jsoup.connect(URL)
-                .userAgent("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36")
-                .timeout(15_000)
+            val body = Jsoup.connect(URL)
+                .ignoreContentType(true)
+                .userAgent("Mozilla/5.0 (Linux; Android 10)")
+                .timeout(10_000)
                 .get()
+                .body()
+                .text()
 
-            val rows = doc.select("table tr")
-            Log.d(TAG, "Found ${rows.size} table rows")
+            val temp = JSONObject(body)
+                .getJSONObject("current")
+                .getDouble("temperature_2m")
+                .toFloat()
 
-            // Log the first few rows for debugging on first run
-            rows.take(4).forEachIndexed { i, row ->
-                Log.d(TAG, "Row $i: ${row.text().take(200)}")
-            }
-
-            // First data row where a cell contains a degree symbol
-            val dataRow = rows.firstOrNull { row ->
-                val cells = row.select("td")
-                cells.size > 2 && cells.any { it.text().contains("°") }
-            } ?: run {
-                Log.w(TAG, "No data row found with degree symbol")
-                return null
-            }
-
-            // Try each cell: parse the first float that looks like a temperature (-50..60)
-            val cells = dataRow.select("td")
-            Log.d(TAG, "Data row cells: ${cells.map { it.text() }}")
-
-            cells.mapNotNull { cell ->
-                val raw = cell.text()
-                    .replace("°C", "").replace("°", "")
-                    .replace(",", ".").trim()
-                raw.toFloatOrNull()?.takeIf { it in -50f..60f }
-            }.firstOrNull().also { temp ->
-                Log.d(TAG, "Outdoor temperature: $temp°C")
-            }
+            Log.d(TAG, "Température extérieure: $temp°C")
+            temp
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch outdoor temperature", e)
+            Log.e(TAG, "Échec récupération température extérieure", e)
             null
         }
     }
