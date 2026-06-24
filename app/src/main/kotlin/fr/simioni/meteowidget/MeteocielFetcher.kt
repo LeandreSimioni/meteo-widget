@@ -32,12 +32,15 @@ object MeteocielFetcher {
             log(ctx, "Requête → $url")
 
             val doc = Jsoup.connect(url)
-                .userAgent("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36")
+                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "fr-FR,fr;q=0.9")
+                .header("Referer", "https://www.meteociel.fr/")
                 .timeout(15_000)
                 .get()
 
             val rows = doc.select("table tr")
-            log(ctx, "${rows.size} lignes trouvées dans la page")
+            log(ctx, "${rows.size} lignes — début réponse: ${doc.body()?.text()?.take(120) ?: "(vide)"}")
 
             // Tableau anti-chronologique — première ligne avec heure ET température valide
             val dataRow = rows.firstOrNull { row ->
