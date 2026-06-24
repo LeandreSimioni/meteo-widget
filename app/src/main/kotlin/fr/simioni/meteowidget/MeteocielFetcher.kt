@@ -26,7 +26,7 @@ object MeteocielFetcher {
             val cal = Calendar.getInstance()
             val url = "$BASE_URL?affint=1&code2=$STATION_CODE" +
                 "&jour2=${cal.get(Calendar.DAY_OF_MONTH)}" +
-                "&mois2=${cal.get(Calendar.MONTH) + 1}" +
+                "&mois2=${cal.get(Calendar.MONTH)}" +
                 "&annee2=${cal.get(Calendar.YEAR)}"
 
             log(ctx, "Requête → $url")
