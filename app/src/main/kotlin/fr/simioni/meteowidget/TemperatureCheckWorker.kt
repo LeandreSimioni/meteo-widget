@@ -4,39 +4,60 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
-import androidx.work.Worker
+import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+class TemperatureCheckWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     companion object {
         const val TAG = "TempCheckWorker"
         const val THRESHOLD = 1.0f
         const val BLE_TIMEOUT_SEC = 15L
     }
 
-    override fun doWork(): Result {
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val notif = NotificationHelper.buildScanNotification(applicationContext)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NotificationHelper.NOTIF_SCAN_ID,
+                notif,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            )
+        } else {
+            ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif)
+        }
+    }
+
+    override suspend fun doWork(): Result {
+        // Se déclare foreground pour survivre en arrière-plan
+        setForeground(getForegroundInfo())
+
         Log.d(TAG, "Worker démarré")
 
-        val indoorTemp = scanBleForIndoorTemp() ?: run {
+        val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() } ?: run {
             Log.w(TAG, "Pas de données BLE")
-            broadcast("Aucune donnée BLE reçue (Aranet hors portée?)")
+            NotificationHelper.showDebug(applicationContext, "Aucune donnée BLE (Aranet hors portée?)")
             return Result.success()
         }
 
-        val outdoorTemp = MeteocielFetcher.fetchOutdoorTemperature() ?: run {
+        val outdoorTemp = withContext(Dispatchers.IO) {
+            MeteocielFetcher.fetchOutdoorTemperature()
+        } ?: run {
             Log.w(TAG, "Météo extérieure indisponible")
-            broadcast("Indoor: %.1f°C | Météo extérieure indisponible".format(indoorTemp))
             saveTemps(indoorTemp, null)
+            TemperatureWidgetProvider.updateAll(applicationContext)
             return Result.success()
         }
 
         val diff = indoorTemp - outdoorTemp
         Log.d(TAG, "Indoor=$indoorTemp Outdoor=$outdoorTemp Diff=$diff")
-        broadcast("Indoor: %.1f°C | Outdoor: %.1f°C | Écart: %+.1f°C".format(indoorTemp, outdoorTemp, diff))
 
         saveTemps(indoorTemp, outdoorTemp)
         TemperatureWidgetProvider.updateAll(applicationContext)
@@ -48,21 +69,17 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Worke
     private fun sendSmartNotification(indoor: Float, outdoor: Float, diff: Float) {
         val prefs = Prefs.get(applicationContext)
         val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
-
         val newState = when {
             diff > THRESHOLD -> Prefs.STATE_OPEN
             diff < -THRESHOLD -> Prefs.STATE_CLOSE
             else -> Prefs.STATE_NONE
         }
-
-        // Notifier uniquement si l'état change
         if (newState != Prefs.STATE_NONE && newState != prevState) {
             NotificationHelper.showTemperatureAlert(
                 applicationContext, indoor, outdoor,
                 openWindows = (newState == Prefs.STATE_OPEN)
             )
         }
-
         prefs.edit().putString(Prefs.KEY_LAST_STATE, newState).apply()
     }
 
@@ -71,10 +88,6 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Worke
             .putFloat(Prefs.KEY_INDOOR, indoor)
             .apply { if (outdoor != null) putFloat(Prefs.KEY_OUTDOOR, outdoor) }
             .apply()
-    }
-
-    private fun broadcast(msg: String) {
-        NotificationHelper.showDebug(applicationContext, msg)
     }
 
     private fun scanBleForIndoorTemp(): Float? {
