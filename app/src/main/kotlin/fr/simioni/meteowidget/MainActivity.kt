@@ -149,9 +149,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun startMonitoring() {
         WorkScheduler.schedule(this)
-        setStatus("Surveillance active (~15 min)", "#2E7D32")
-        appendLog("WorkManager planifié — scan immédiat")
-        launchScan()
+        setStatus("Pipeline lancé (BLE + Météo + comparaison)...", "#1565C0")
+        appendLog("WorkManager planifié — exécution immédiate du pipeline complet")
+        WorkScheduler.runNow(this)
     }
 
     private fun setStatus(msg: String, colorHex: String) {
