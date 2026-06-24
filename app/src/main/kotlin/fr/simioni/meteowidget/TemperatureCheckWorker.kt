@@ -42,7 +42,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
         if (indoorTemp == null) Log.w(TAG, "Aranet hors portée — on continue avec Meteociel")
 
-        val outdoorTemp = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature() }
+        val outdoorTemp = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature(applicationContext) }
         if (outdoorTemp == null) Log.w(TAG, "Meteociel indisponible")
 
         if (indoorTemp == null && outdoorTemp == null) {

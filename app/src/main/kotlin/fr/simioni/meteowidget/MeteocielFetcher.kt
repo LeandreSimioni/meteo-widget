@@ -1,5 +1,7 @@
 package fr.simioni.meteowidget
 
+import android.content.Context
+import android.content.Intent
 import android.util.Log
 import org.jsoup.Jsoup
 import java.util.Calendar
@@ -11,7 +13,15 @@ object MeteocielFetcher {
 
     private val timePattern = Regex("""^\d{1,2}h\d{2}$""")
 
-    fun fetchOutdoorTemperature(): Float? {
+    private fun log(ctx: Context, msg: String) {
+        Log.d(TAG, msg)
+        ctx.sendBroadcast(Intent(BleScanService.ACTION_LOG).apply {
+            setPackage(ctx.packageName)
+            putExtra(BleScanService.EXTRA_LOG_MSG, "[Météo] $msg")
+        })
+    }
+
+    fun fetchOutdoorTemperature(ctx: Context): Float? {
         return try {
             val cal = Calendar.getInstance()
             val url = "$BASE_URL?affint=1&code2=$STATION_CODE" +
@@ -19,16 +29,17 @@ object MeteocielFetcher {
                 "&mois2=${cal.get(Calendar.MONTH) + 1}" +
                 "&annee2=${cal.get(Calendar.YEAR)}"
 
+            log(ctx, "Requête → $url")
+
             val doc = Jsoup.connect(url)
                 .userAgent("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36")
                 .timeout(15_000)
                 .get()
 
             val rows = doc.select("table tr")
+            log(ctx, "${rows.size} lignes trouvées dans la page")
 
-            // Colonnes : Heure(0) | Visi(1) | Température(2) | Humi(3) | ...
-            // Tableau anti-chronologique — on cherche la première ligne avec une heure
-            // ET une température valide (la ligne la plus récente peut avoir une cellule vide)
+            // Tableau anti-chronologique — première ligne avec heure ET température valide
             val dataRow = rows.firstOrNull { row ->
                 val cells = row.select("td")
                 if (cells.size < 3) return@firstOrNull false
@@ -38,7 +49,7 @@ object MeteocielFetcher {
                     ?.toFloatOrNull()?.let { it in -50f..60f } == true
                 timeOk && tempOk
             } ?: run {
-                Log.w(TAG, "Aucun relevé trouvé")
+                log(ctx, "ERREUR: aucun relevé valide trouvé")
                 return null
             }
 
@@ -48,9 +59,10 @@ object MeteocielFetcher {
                 .replace("°C", "").replace(",", ".").trim()
                 .toFloat()
 
-            Log.d(TAG, "Relevé $timeStr → $temp°C")
+            log(ctx, "Relevé $timeStr → $temp°C")
             temp
         } catch (e: Exception) {
+            log(ctx, "ERREUR: ${e.message}")
             Log.e(TAG, "Échec récupération température", e)
             null
         }
