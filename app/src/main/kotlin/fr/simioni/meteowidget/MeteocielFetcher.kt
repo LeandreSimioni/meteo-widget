@@ -40,7 +40,7 @@ object MeteocielFetcher {
             val timeStr = dataRow.select("td")[0].text()
             val temp = dataRow.select("td").getOrNull(2)
                 ?.text()
-                ?.replace("°C", "").replace(",", ".").trim()
+                ?.replace("°C", "")?.replace(",", ".")?.trim()
                 ?.toFloatOrNull()
                 ?.takeIf { it in -50f..60f }
 
