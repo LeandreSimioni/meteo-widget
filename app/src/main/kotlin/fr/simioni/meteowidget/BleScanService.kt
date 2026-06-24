@@ -40,6 +40,8 @@ class BleScanService : Service() {
     }
 
     private fun sendResult(temp: Float? = null) {
+        if (resultSent) return
+        resultSent = true
         sendBroadcast(Intent(ACTION_RESULT).apply {
             setPackage(packageName)
             if (temp != null) putExtra(EXTRA_TEMPERATURE, temp)
@@ -51,7 +53,9 @@ class BleScanService : Service() {
             val address = result.device.address
             if (!seenAddresses.add(address)) return
 
-            val name = result.device.name ?: result.scanRecord?.deviceName ?: "(sans nom)"
+            // device.name requires BLUETOOTH_CONNECT — protect against SecurityException
+            val name = try { result.device.name } catch (_: SecurityException) { null }
+                ?: result.scanRecord?.deviceName ?: "(sans nom)"
             val rssi = result.rssi
             val mfData = result.scanRecord?.manufacturerSpecificData
             val mfStr = if (mfData != null && mfData.size() > 0)
@@ -60,7 +64,6 @@ class BleScanService : Service() {
 
             log("[$rssi dBm] $name | MfID: $mfStr")
 
-            if (resultSent) return
             val data = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID) ?: return
 
             log("→ ARANET détecté! ${data.size} bytes: ${AranetDecoder.toHex(data)}")
@@ -73,7 +76,6 @@ class BleScanService : Service() {
             log("→ Temp=%.1f°C CO2=%dppm Hum=%d%% Bat=%d%% Age=%ds".format(
                 reading.temperatureC, reading.co2Ppm, reading.humidity, reading.battery, reading.ageSec))
 
-            resultSent = true
             NotificationHelper.showDebug(this@BleScanService,
                 "Indoor: %.1f°C | CO2: %dppm | Age: %ds".format(
                     reading.temperatureC, reading.co2Ppm, reading.ageSec))
@@ -90,6 +92,7 @@ class BleScanService : Service() {
                 else -> "code=$errorCode"
             }
             log("ERREUR scan: $reason")
+            sendResult()
             stopSelf()
         }
     }
@@ -110,14 +113,20 @@ class BleScanService : Service() {
             stopSelf()
             return
         }
+        val scanner = adapter.bluetoothLeScanner ?: run {
+            log("Scanner BLE non disponible")
+            sendResult()
+            stopSelf()
+            return
+        }
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
         try {
-            adapter.bluetoothLeScanner.startScan(null, settings, scanCallback)
+            scanner.startScan(null, settings, scanCallback)
             log("Scan démarré (${SCAN_DURATION_MS / 1000}s)...")
             Handler(Looper.getMainLooper()).postDelayed({
-                try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Exception) {}
+                try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
                 log("Fin scan — ${seenAddresses.size} appareils vus")
                 if (!resultSent) {
                     log("Aranet4 (MfID 0x0702) NON trouvé")
@@ -126,7 +135,8 @@ class BleScanService : Service() {
                 stopSelf()
             }, SCAN_DURATION_MS)
         } catch (e: Exception) {
-            log("Exception: ${e.message}")
+            log("Exception scan: ${e.message}")
+            sendResult()
             stopSelf()
         }
     }
@@ -135,6 +145,6 @@ class BleScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Exception) {}
+        try { adapter.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
     }
 }

@@ -24,14 +24,14 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val notif = NotificationHelper.buildScanNotification(applicationContext)
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(
-                NotificationHelper.NOTIF_SCAN_ID,
-                notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif)
+        return when {
+            // API 34+: SHORT_SERVICE n'a aucun prérequis Bluetooth, parfait pour un Worker de ~20s
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            else ->
+                ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif)
         }
     }
 
