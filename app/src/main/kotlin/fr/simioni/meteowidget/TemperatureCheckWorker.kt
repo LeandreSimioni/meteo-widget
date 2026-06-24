@@ -15,38 +15,66 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Worke
     companion object {
         const val TAG = "TempCheckWorker"
         const val THRESHOLD = 1.0f
-        const val BLE_TIMEOUT_SEC = 10L
+        const val BLE_TIMEOUT_SEC = 15L
     }
 
     override fun doWork(): Result {
-        Log.d(TAG, "Worker triggered")
+        Log.d(TAG, "Worker démarré")
 
         val indoorTemp = scanBleForIndoorTemp() ?: run {
-            Log.w(TAG, "No BLE result received within ${BLE_TIMEOUT_SEC}s")
-            NotificationHelper.showDebug(applicationContext, "Aucune donnée BLE reçue (Aranet hors portée ?)")
+            Log.w(TAG, "Pas de données BLE")
+            broadcast("Aucune donnée BLE reçue (Aranet hors portée?)")
             return Result.success()
         }
 
         val outdoorTemp = MeteocielFetcher.fetchOutdoorTemperature() ?: run {
-            Log.w(TAG, "Outdoor temperature unavailable")
-            NotificationHelper.showDebug(applicationContext,
-                "Indoor: %.1f°C | Météo extérieure indisponible".format(indoorTemp))
+            Log.w(TAG, "Météo extérieure indisponible")
+            broadcast("Indoor: %.1f°C | Météo extérieure indisponible".format(indoorTemp))
+            saveTemps(indoorTemp, null)
             return Result.success()
         }
 
         val diff = indoorTemp - outdoorTemp
-        Log.d(TAG, "Indoor: ${indoorTemp}°C | Outdoor: ${outdoorTemp}°C | Diff: ${diff}°C")
-        NotificationHelper.showDebug(applicationContext,
-            "Indoor: %.1f°C | Outdoor: %.1f°C | Écart: %+.1f°C".format(indoorTemp, outdoorTemp, diff))
+        Log.d(TAG, "Indoor=$indoorTemp Outdoor=$outdoorTemp Diff=$diff")
+        broadcast("Indoor: %.1f°C | Outdoor: %.1f°C | Écart: %+.1f°C".format(indoorTemp, outdoorTemp, diff))
 
-        when {
-            diff > THRESHOLD ->
-                NotificationHelper.showTemperatureAlert(applicationContext, indoorTemp, outdoorTemp, openWindows = true)
-            diff < -THRESHOLD ->
-                NotificationHelper.showTemperatureAlert(applicationContext, indoorTemp, outdoorTemp, openWindows = false)
-        }
+        saveTemps(indoorTemp, outdoorTemp)
+        TemperatureWidgetProvider.updateAll(applicationContext)
+        sendSmartNotification(indoorTemp, outdoorTemp, diff)
 
         return Result.success()
+    }
+
+    private fun sendSmartNotification(indoor: Float, outdoor: Float, diff: Float) {
+        val prefs = Prefs.get(applicationContext)
+        val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
+
+        val newState = when {
+            diff > THRESHOLD -> Prefs.STATE_OPEN
+            diff < -THRESHOLD -> Prefs.STATE_CLOSE
+            else -> Prefs.STATE_NONE
+        }
+
+        // Notifier uniquement si l'état change
+        if (newState != Prefs.STATE_NONE && newState != prevState) {
+            NotificationHelper.showTemperatureAlert(
+                applicationContext, indoor, outdoor,
+                openWindows = (newState == Prefs.STATE_OPEN)
+            )
+        }
+
+        prefs.edit().putString(Prefs.KEY_LAST_STATE, newState).apply()
+    }
+
+    private fun saveTemps(indoor: Float, outdoor: Float?) {
+        Prefs.get(applicationContext).edit()
+            .putFloat(Prefs.KEY_INDOOR, indoor)
+            .apply { if (outdoor != null) putFloat(Prefs.KEY_OUTDOOR, outdoor) }
+            .apply()
+    }
+
+    private fun broadcast(msg: String) {
+        NotificationHelper.showDebug(applicationContext, msg)
     }
 
     private fun scanBleForIndoorTemp(): Float? {
@@ -61,14 +89,12 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Worke
             }
         }
 
+        val filter = IntentFilter(BleScanService.ACTION_RESULT)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            applicationContext.registerReceiver(
-                receiver,
-                IntentFilter(BleScanService.ACTION_RESULT),
-                Context.RECEIVER_NOT_EXPORTED
-            )
+            applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            applicationContext.registerReceiver(receiver, IntentFilter(BleScanService.ACTION_RESULT))
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            applicationContext.registerReceiver(receiver, filter)
         }
 
         applicationContext.startForegroundService(Intent(applicationContext, BleScanService::class.java))
