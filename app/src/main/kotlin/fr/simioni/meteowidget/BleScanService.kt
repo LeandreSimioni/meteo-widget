@@ -3,7 +3,6 @@ package fr.simioni.meteowidget
 import android.app.Service
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -17,72 +16,113 @@ class BleScanService : Service() {
     companion object {
         const val TAG = "BleScanService"
         const val MANUFACTURER_ID = 0x0702
-        const val SCAN_DURATION_MS = 5_000L
+        const val SCAN_DURATION_MS = 8_000L
         const val ACTION_RESULT = "fr.simioni.meteowidget.BLE_RESULT"
+        const val ACTION_LOG = "fr.simioni.meteowidget.BLE_LOG"
         const val EXTRA_TEMPERATURE = "temperature"
+        const val EXTRA_LOG_MSG = "log_msg"
     }
 
-    private val bluetoothLeScanner by lazy {
-        (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
-            .adapter.bluetoothLeScanner
-    }
-
+    private val seenAddresses = mutableSetOf<String>()
     private var resultSent = false
+    private var scanStarted = false
+
+    private val adapter by lazy {
+        (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    }
+
+    private fun log(msg: String) {
+        Log.d(TAG, msg)
+        sendBroadcast(Intent(ACTION_LOG).putExtra(EXTRA_LOG_MSG, msg))
+    }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val address = result.device.address
+            if (!seenAddresses.add(address)) return
+
+            val name = result.device.name
+                ?: result.scanRecord?.deviceName
+                ?: "(sans nom)"
+            val rssi = result.rssi
+            val mfData = result.scanRecord?.manufacturerSpecificData
+            val mfStr = if (mfData != null && mfData.size() > 0)
+                (0 until mfData.size()).joinToString { "0x%04X".format(mfData.keyAt(it)) }
+            else "(aucun)"
+
+            log("[$rssi dBm] $name | MfID: $mfStr")
+
             if (resultSent) return
             val data = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID) ?: return
 
-            Log.d(TAG, "Raw BLE (${data.size} bytes): ${AranetDecoder.toHex(data)}")
+            log("→ ARANET détecté! ${data.size} bytes: ${AranetDecoder.toHex(data)}")
 
             val reading = AranetDecoder.decode(data) ?: run {
-                Log.w(TAG, "Incomplete frame (${data.size} bytes) — Smart Home enabled?")
+                log("→ Trame trop courte (${data.size} < 21) — Smart Home activé dans l'app Aranet?")
                 return
             }
 
-            Log.d(TAG, "Aranet: ${reading.temperatureC}°C | CO2=${reading.co2Ppm}ppm | " +
-                    "Hum=${reading.humidity}% | Bat=${reading.battery}% | Age=${reading.ageSec}s")
-
-            NotificationHelper.showDebug(
-                this@BleScanService,
-                "Indoor: %.1f°C | CO2: %dppm | Age: %ds | Bat: %d%%".format(
-                    reading.temperatureC, reading.co2Ppm, reading.ageSec, reading.battery
-                )
-            )
+            log("→ Temp=%.1f°C CO2=%dppm Hum=%d%% Bat=%d%% Age=%ds".format(
+                reading.temperatureC, reading.co2Ppm, reading.humidity, reading.battery, reading.ageSec))
 
             resultSent = true
+            NotificationHelper.showDebug(this@BleScanService,
+                "Indoor: %.1f°C | CO2: %dppm | Age: %ds".format(
+                    reading.temperatureC, reading.co2Ppm, reading.ageSec))
             sendBroadcast(Intent(ACTION_RESULT).putExtra(EXTRA_TEMPERATURE, reading.temperatureC))
             stopSelf()
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "BLE scan failed: errorCode=$errorCode")
+            val reason = when (errorCode) {
+                SCAN_FAILED_ALREADY_STARTED -> "ALREADY_STARTED"
+                SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "REGISTRATION_FAILED"
+                SCAN_FAILED_FEATURE_UNSUPPORTED -> "FEATURE_UNSUPPORTED"
+                SCAN_FAILED_INTERNAL_ERROR -> "INTERNAL_ERROR"
+                else -> "code=$errorCode"
+            }
+            log("ERREUR scan BLE: $reason")
             stopSelf()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NotificationHelper.NOTIF_SCAN_ID, NotificationHelper.buildScanNotification(this))
-        startBleScan()
+        if (!scanStarted) {
+            scanStarted = true
+            startBleScan()
+        }
         return START_NOT_STICKY
     }
 
     private fun startBleScan() {
-        val filter = ScanFilter.Builder()
-            .setManufacturerData(MANUFACTURER_ID, null)
-            .build()
+        if (!adapter.isEnabled) {
+            log("ERREUR: Bluetooth désactivé!")
+            stopSelf()
+            return
+        }
+
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
+
         try {
-            bluetoothLeScanner.startScan(listOf(filter), settings, scanCallback)
+            // Scan sans filtre pour voir TOUS les appareils BLE
+            adapter.bluetoothLeScanner.startScan(null, settings, scanCallback)
+            log("Scan démarré (${SCAN_DURATION_MS / 1000}s) — tous appareils BLE...")
+
             Handler(Looper.getMainLooper()).postDelayed({
-                bluetoothLeScanner.stopScan(scanCallback)
+                try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Exception) {}
+                log("Fin scan — ${seenAddresses.size} appareils vus au total")
+                if (!resultSent) {
+                    log("Aranet4 (MfID 0x0702) NON trouvé parmi ces appareils")
+                    // Réveille le Worker même si rien trouvé
+                    sendBroadcast(Intent(ACTION_RESULT))
+                }
                 stopSelf()
             }, SCAN_DURATION_MS)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start BLE scan", e)
+            log("Exception au démarrage: ${e.message}")
             stopSelf()
         }
     }
@@ -91,6 +131,6 @@ class BleScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try { bluetoothLeScanner.stopScan(scanCallback) } catch (_: Exception) {}
+        try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Exception) {}
     }
 }
