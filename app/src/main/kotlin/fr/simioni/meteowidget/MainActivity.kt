@@ -29,6 +29,8 @@ class MainActivity : AppCompatActivity() {
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
+    private var pendingMonitor = false
+
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -38,9 +40,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 BleScanService.ACTION_RESULT -> {
                     val temp = intent.getFloatExtra(BleScanService.EXTRA_TEMPERATURE, Float.NaN)
-                    if (!temp.isNaN()) {
-                        statusText.text = "Indoor: %.1f°C".format(temp)
-                    }
+                    if (!temp.isNaN()) statusText.text = "Indoor: %.1f°C".format(temp)
                 }
             }
         }
@@ -49,12 +49,13 @@ class MainActivity : AppCompatActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        if (results.all { it.value }) {
-            startMonitoring()
+        val denied = results.filterValues { !it }.keys
+        if (denied.isEmpty()) {
+            appendLog("Permissions accordées")
+            if (pendingMonitor) startMonitoring() else launchScan()
         } else {
-            val denied = results.filterValues { !it }.keys.joinToString()
-            appendLog("PERMISSIONS REFUSÉES: $denied")
-            statusText.text = "Permissions refusées"
+            appendLog("PERMISSIONS REFUSÉES: ${denied.map { it.substringAfterLast('.') }}")
+            statusText.text = "Permissions BLE refusées"
         }
     }
 
@@ -63,24 +64,23 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         NotificationHelper.createChannels(this)
-
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
         logScroll = findViewById(R.id.logScroll)
 
         findViewById<Button>(R.id.btnStart).setOnClickListener {
-            checkPermissionsAndStart()
+            pendingMonitor = true
+            checkPermissionsThen()
         }
-
         findViewById<Button>(R.id.btnScan).setOnClickListener {
             appendLog("--- Scan manuel ---")
-            startForegroundService(Intent(this, BleScanService::class.java))
+            pendingMonitor = false
+            checkPermissionsThen()
         }
-
         findViewById<Button>(R.id.btnCopyLogs).setOnClickListener {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("meteo-widget logs", logBuffer.toString()))
-            Toast.makeText(this, "Logs copiés dans le presse-papier", Toast.LENGTH_SHORT).show()
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(ClipData.newPlainText("meteo-widget logs", logBuffer.toString()))
+            Toast.makeText(this, "Logs copiés", Toast.LENGTH_SHORT).show()
         }
 
         val filter = IntentFilter().apply {
@@ -94,8 +94,15 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(scanReceiver, filter)
         }
 
-        appendLog("App démarrée — Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-        appendLog("Permissions BLE: ${checkBlePermissions()}")
+        appendLog("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        appendLog("Permissions: ${permissionStatus()}")
+
+        // Demande les permissions dès l'ouverture
+        if (!hasAllPermissions()) {
+            appendLog("Demande de permissions au démarrage...")
+            pendingMonitor = false
+            permissionLauncher.launch(requiredPermissions().toTypedArray())
+        }
     }
 
     override fun onDestroy() {
@@ -112,35 +119,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkBlePermissions(): String {
+    private fun requiredPermissions() = buildList {
+        add(Manifest.permission.BLUETOOTH_SCAN)
+        add(Manifest.permission.BLUETOOTH_CONNECT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun hasAllPermissions() = requiredPermissions().all {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun permissionStatus(): String {
         val scan = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
         val connect = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
         return "SCAN=${if (scan == PackageManager.PERMISSION_GRANTED) "OK" else "MANQUANT"} " +
                 "CONNECT=${if (connect == PackageManager.PERMISSION_GRANTED) "OK" else "MANQUANT"}"
     }
 
-    private fun checkPermissionsAndStart() {
-        val required = buildList {
-            add(Manifest.permission.BLUETOOTH_SCAN)
-            add(Manifest.permission.BLUETOOTH_CONNECT)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-        val missing = required.filter {
+    private fun checkPermissionsThen() {
+        val missing = requiredPermissions().filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) startMonitoring()
-        else {
-            appendLog("Demande permissions: ${missing.map { it.substringAfterLast('.') }}")
+        if (missing.isEmpty()) {
+            if (pendingMonitor) startMonitoring() else launchScan()
+        } else {
+            appendLog("Demande: ${missing.map { it.substringAfterLast('.') }}")
             permissionLauncher.launch(missing.toTypedArray())
         }
+    }
+
+    private fun launchScan() {
+        startForegroundService(Intent(this, BleScanService::class.java))
     }
 
     private fun startMonitoring() {
         WorkScheduler.schedule(this)
         statusText.text = "Surveillance active (~15 min)"
         appendLog("WorkManager planifié — scan immédiat lancé")
-        startForegroundService(Intent(this, BleScanService::class.java))
+        launchScan()
     }
 }
