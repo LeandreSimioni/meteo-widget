@@ -36,32 +36,27 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
     }
 
     override suspend fun doWork(): Result {
-        // Se déclare foreground pour survivre en arrière-plan
         setForeground(getForegroundInfo())
-
         Log.d(TAG, "Worker démarré")
 
-        val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() } ?: run {
-            Log.w(TAG, "Pas de données BLE")
-            NotificationHelper.showDebug(applicationContext, "Aucune donnée BLE (Aranet hors portée?)")
+        val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
+        if (indoorTemp == null) Log.w(TAG, "Aranet hors portée — on continue avec Meteociel")
+
+        val outdoorTemp = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature() }
+        if (outdoorTemp == null) Log.w(TAG, "Meteociel indisponible")
+
+        if (indoorTemp == null && outdoorTemp == null) {
+            Log.w(TAG, "Aucune donnée disponible")
             return Result.success()
         }
 
-        val outdoorTemp = withContext(Dispatchers.IO) {
-            MeteocielFetcher.fetchOutdoorTemperature()
-        } ?: run {
-            Log.w(TAG, "Météo extérieure indisponible")
-            saveTemps(indoorTemp, null)
-            TemperatureWidgetProvider.updateAll(applicationContext)
-            return Result.success()
-        }
-
-        val diff = indoorTemp - outdoorTemp
-        Log.d(TAG, "Indoor=$indoorTemp Outdoor=$outdoorTemp Diff=$diff")
-
+        Log.d(TAG, "Indoor=${indoorTemp ?: "N/A"} Outdoor=${outdoorTemp ?: "N/A"}")
         saveTemps(indoorTemp, outdoorTemp)
         TemperatureWidgetProvider.updateAll(applicationContext)
-        sendSmartNotification(indoorTemp, outdoorTemp, diff)
+
+        if (indoorTemp != null && outdoorTemp != null) {
+            sendSmartNotification(indoorTemp, outdoorTemp, indoorTemp - outdoorTemp)
+        }
 
         return Result.success()
     }
@@ -83,9 +78,9 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         prefs.edit().putString(Prefs.KEY_LAST_STATE, newState).apply()
     }
 
-    private fun saveTemps(indoor: Float, outdoor: Float?) {
+    private fun saveTemps(indoor: Float?, outdoor: Float?) {
         Prefs.get(applicationContext).edit()
-            .putFloat(Prefs.KEY_INDOOR, indoor)
+            .apply { if (indoor != null) putFloat(Prefs.KEY_INDOOR, indoor) }
             .apply { if (outdoor != null) putFloat(Prefs.KEY_OUTDOOR, outdoor) }
             .apply()
     }
@@ -110,9 +105,15 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
             applicationContext.registerReceiver(receiver, filter)
         }
 
-        applicationContext.startForegroundService(Intent(applicationContext, BleScanService::class.java))
-        latch.await(BLE_TIMEOUT_SEC, TimeUnit.SECONDS)
+        try {
+            applicationContext.startForegroundService(Intent(applicationContext, BleScanService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "Impossible de démarrer BleScanService: ${e.message}")
+            try { applicationContext.unregisterReceiver(receiver) } catch (_: Exception) {}
+            return null
+        }
 
+        latch.await(BLE_TIMEOUT_SEC, TimeUnit.SECONDS)
         try { applicationContext.unregisterReceiver(receiver) } catch (_: Exception) {}
         return temperature
     }

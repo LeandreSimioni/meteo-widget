@@ -105,7 +105,8 @@ class BleScanService : Service() {
 
     private fun startBleScan() {
         if (!adapter.isEnabled) {
-            log("ERREUR: Bluetooth désactivé!")
+            log("Bluetooth désactivé — scan ignoré")
+            sendResult()
             stopSelf()
             return
         }
