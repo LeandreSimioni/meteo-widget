@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.ScrollView
@@ -119,9 +120,20 @@ class MainActivity : AppCompatActivity() {
         // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
             WorkScheduler.schedule(this)
+            requestBatteryOptimizationExemption()
         } else {
             setStatus("Autorisation BLE requise", "#F57F17")
             permLauncher.launch(requiredPerms().toTypedArray())
+        }
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")))
+            } catch (_: Exception) {}
         }
     }
 
