@@ -30,20 +30,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logScroll: ScrollView
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    private var pendingMonitor = false
-    private var isFirstResume = true
 
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                BleScanService.ACTION_LOG -> {
-                    val msg = intent.getStringExtra(BleScanService.EXTRA_LOG_MSG) ?: return
-                    // LogStore already persisted the line — just update the UI
-                    appendLogToUi(msg)
-                }
+                BleScanService.ACTION_LOG ->
+                    appendLogToUi(intent.getStringExtra(BleScanService.EXTRA_LOG_MSG) ?: return)
                 BleScanService.ACTION_RESULT -> {
                     val temp = intent.getFloatExtra(BleScanService.EXTRA_TEMPERATURE, Float.NaN)
-                    if (!temp.isNaN()) setStatus("Indoor: %.1f°C".format(temp), "#2E7D32")
+                    if (!temp.isNaN()) showTemps()
                 }
             }
         }
@@ -54,16 +49,15 @@ class MainActivity : AppCompatActivity() {
     ) { results ->
         val denied = results.filterValues { !it }.keys
         if (denied.isEmpty()) {
-            appendLog("Permissions accordées OK")
-            if (pendingMonitor) startMonitoring() else launchScan()
+            appendLog("Permissions accordées — démarrage du pipeline")
+            WorkScheduler.schedule(this)
         } else {
-            appendLog("REFUSÉES: ${denied.map { it.substringAfterLast('.') }}")
-            // Si refus définitif, proposer d'ouvrir les paramètres
             val permanent = denied.any { !shouldShowRequestPermissionRationale(it) }
             if (permanent) {
-                setStatus("Permissions refusées — appuyer sur Démarrer pour ouvrir les Paramètres", "#B71C1C")
+                setStatus("Permissions refusées — ouvrir Paramètres et les accorder", "#B71C1C")
             } else {
-                setStatus("Permissions nécessaires — appuyer sur Démarrer", "#F57F17")
+                appendLog("Permissions refusées: ${denied.map { it.substringAfterLast('.') }}")
+                setStatus("Permissions BLE requises", "#F57F17")
             }
         }
     }
@@ -71,7 +65,10 @@ class MainActivity : AppCompatActivity() {
     private val settingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        appendLog("Retour des paramètres — permissions: ${permissionStatus()}")
+        if (hasPermissions()) {
+            appendLog("Permissions OK après paramètres")
+            WorkScheduler.schedule(this)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,21 +79,6 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
         logScroll = findViewById(R.id.logScroll)
-
-        findViewById<Button>(R.id.btnStart).setOnClickListener {
-            pendingMonitor = true
-            checkAndGo()
-        }
-        findViewById<Button>(R.id.btnScan).setOnClickListener {
-            pendingMonitor = false
-            appendLog("--- Scan manuel ---")
-            checkAndGo()
-        }
-        findViewById<Button>(R.id.btnCopyLogs).setOnClickListener {
-            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cb.setPrimaryClip(ClipData.newPlainText("logs", logBuffer.toString()))
-            Toast.makeText(this, "Copié !", Toast.LENGTH_SHORT).show()
-        }
 
         val filter = IntentFilter().apply {
             addAction(BleScanService.ACTION_LOG)
@@ -109,33 +91,48 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(scanReceiver, filter)
         }
 
-        appendLog("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        // "Forcer un cycle maintenant" — remplace toute tâche en attente
+        findViewById<Button>(R.id.btnStart).setOnClickListener {
+            if (hasPermissions()) {
+                appendLog("--- Cycle forcé ---")
+                WorkScheduler.schedule(this)
+            } else {
+                requestPermsOrSettings()
+            }
+        }
+        // Scan BLE seul (diagnostic)
+        findViewById<Button>(R.id.btnScan).setOnClickListener {
+            if (hasPermissions()) {
+                appendLog("--- Scan BLE manuel ---")
+                startForegroundService(Intent(this, BleScanService::class.java))
+            } else {
+                requestPermsOrSettings()
+            }
+        }
+        findViewById<Button>(R.id.btnCopyLogs).setOnClickListener {
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(ClipData.newPlainText("logs", logBuffer.toString()))
+            Toast.makeText(this, "Copié !", Toast.LENGTH_SHORT).show()
+        }
 
+        // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
-            appendLog("Permissions OK")
+            WorkScheduler.schedule(this)
         } else {
-            appendLog("Permissions manquantes — demande en cours...")
             setStatus("Autorisation BLE requise", "#F57F17")
-            pendingMonitor = false
             permLauncher.launch(requiredPerms().toTypedArray())
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (isFirstResume) {
-            isFirstResume = false
-            val stored = LogStore.getLogs(this)
-            if (stored.isNotEmpty()) {
-                // Prepend persisted background logs before current-session messages
-                val sessionLines = logBuffer.toString()
-                logBuffer.clear()
-                stored.forEach { logBuffer.append("$it\n") }
-                logBuffer.append(sessionLines)
-                logText.text = logBuffer.toString()
-                logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
-            }
-        }
+        // Toujours recharger l'historique complet depuis le store persistant
+        val stored = LogStore.getLogs(this)
+        logBuffer.clear()
+        stored.forEach { logBuffer.append("$it\n") }
+        logText.text = logBuffer.toString()
+        logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        showTemps()
     }
 
     override fun onDestroy() {
@@ -143,17 +140,26 @@ class MainActivity : AppCompatActivity() {
         unregisterReceiver(scanReceiver)
     }
 
-    private fun checkAndGo() {
-        if (hasPermissions()) {
-            if (pendingMonitor) startMonitoring() else launchScan()
-            return
+    private fun showTemps() {
+        val prefs = Prefs.get(this)
+        val indoor = prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN)
+        val outdoor = prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN)
+        val state = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE)
+        val indoorStr = if (indoor.isNaN()) "--" else "%.1f°C".format(indoor)
+        val outdoorStr = if (outdoor.isNaN()) "--" else "%.1f°C".format(outdoor)
+        val advice = when (state) {
+            Prefs.STATE_OPEN  -> " · ↑ Ouvrir"
+            Prefs.STATE_CLOSE -> " · ↓ Fermer"
+            else -> ""
         }
+        setStatus("$indoorStr dedans · $outdoorStr dehors$advice", "#1565C0")
+    }
+
+    private fun requestPermsOrSettings() {
         val anyPermanent = requiredPerms()
             .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
             .any { !shouldShowRequestPermissionRationale(it) }
-
         if (anyPermanent) {
-            appendLog("Permissions refusées définitivement → ouverture Paramètres")
             settingsLauncher.launch(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.fromParts("package", packageName, null))
@@ -163,17 +169,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun launchScan() {
-        setStatus("Scan BLE en cours...", "#1565C0")
-        startForegroundService(Intent(this, BleScanService::class.java))
-    }
-
-    private fun startMonitoring() {
-        WorkScheduler.schedule(this)
-        setStatus("Pipeline lancé (BLE + Météo + comparaison)...", "#1565C0")
-        appendLog("WorkManager planifié — 1ère exécution immédiate")
-    }
-
     private fun setStatus(msg: String, colorHex: String) {
         runOnUiThread {
             statusText.text = msg
@@ -181,7 +176,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendLog(msg: String) = appendLogToUi(msg)
+    private fun appendLog(msg: String) {
+        LogStore.append(this, msg)
+        appendLogToUi(msg)
+    }
 
     private fun appendLogToUi(msg: String) {
         val line = "[${timeFmt.format(Date())}] $msg\n"
@@ -201,11 +199,5 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasPermissions() = requiredPerms().all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun permissionStatus(): String {
-        fun s(p: String) = if (ContextCompat.checkSelfPermission(this, p) ==
-            PackageManager.PERMISSION_GRANTED) "OK" else "MANQUANT"
-        return "SCAN=${s(Manifest.permission.BLUETOOTH_SCAN)} CONNECT=${s(Manifest.permission.BLUETOOTH_CONNECT)}"
     }
 }

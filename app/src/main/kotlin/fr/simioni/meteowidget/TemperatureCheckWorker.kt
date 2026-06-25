@@ -38,6 +38,10 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
     private fun log(msg: String) {
         Log.d(TAG, msg)
         LogStore.append(applicationContext, "[Worker] $msg")
+        applicationContext.sendBroadcast(Intent(BleScanService.ACTION_LOG).apply {
+            setPackage(applicationContext.packageName)
+            putExtra(BleScanService.EXTRA_LOG_MSG, "[Worker] $msg")
+        })
     }
 
     override suspend fun doWork(): Result {
