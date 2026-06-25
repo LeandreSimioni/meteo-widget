@@ -70,19 +70,23 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
             return Result.success()
         }
 
+        var stateChanged = false
         val openWindows: Boolean? = if (indoor != null && outdoor != null) {
             val diff = indoor - outdoor
+            val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
             val state = when {
                 diff > THRESHOLD  -> Prefs.STATE_OPEN
                 diff < -THRESHOLD -> Prefs.STATE_CLOSE
                 else              -> Prefs.STATE_NONE
             }
             log("%.1f°C dedans · %.1f°C dehors → %s".format(indoor, outdoor, state))
+            // Alerter uniquement sur transition vers un état actionnable (OPEN ou CLOSE)
+            stateChanged = state != Prefs.STATE_NONE && state != prevState
             prefs.edit().putString(Prefs.KEY_LAST_STATE, state).apply()
             when (state) { Prefs.STATE_OPEN -> true; Prefs.STATE_CLOSE -> false; else -> null }
         } else null
 
-        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows)
+        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged)
         TemperatureWidgetProvider.updateAll(applicationContext)
         return Result.success()
     }
