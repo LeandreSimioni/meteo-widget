@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         if (denied.isEmpty()) {
             appendLog("Permissions accordées — démarrage du pipeline")
             WorkScheduler.schedule(this)
+            WorkScheduler.runNow(this)
         } else {
             val permanent = denied.any { !shouldShowRequestPermissionRationale(it) }
             if (permanent) {
@@ -95,7 +96,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnStart).setOnClickListener {
             if (hasPermissions()) {
                 appendLog("--- Cycle forcé ---")
-                WorkScheduler.schedule(this)
+                WorkScheduler.runNow(this)
             } else {
                 requestPermsOrSettings()
             }

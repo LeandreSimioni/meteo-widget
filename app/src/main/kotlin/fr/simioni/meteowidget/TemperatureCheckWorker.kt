@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 class TemperatureCheckWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     companion object {
         const val TAG = "TempCheckWorker"
-        const val THRESHOLD = 1.0f
+        const val THRESHOLD = 0.5f
         const val BLE_TIMEOUT_SEC = 15L
     }
 
