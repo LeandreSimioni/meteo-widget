@@ -10,11 +10,11 @@ import androidx.core.app.NotificationCompat
 
 object NotificationHelper {
     const val CHANNEL_SCAN = "ble_scan"
-    const val CHANNEL_STATUS = "temp_status"
+    const val CHANNEL_STATUS = "temp_status_v2" // v2 = importance DEFAULT (l'ancien était LOW/silencieux)
 
     const val NOTIF_SCAN_ID = 1
     const val NOTIF_STATUS_ID = 3
-    private const val NOTIF_ALERT_ID_LEGACY = 2 // à annuler si encore affiché
+    private const val NOTIF_ALERT_ID_LEGACY = 2
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -22,8 +22,10 @@ object NotificationHelper {
             NotificationChannel(CHANNEL_SCAN, "Scan BLE", NotificationManager.IMPORTANCE_LOW)
         )
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_STATUS, "Statut température", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_STATUS, "Statut température", NotificationManager.IMPORTANCE_DEFAULT)
         )
+        // Supprimer l'ancien canal silencieux (Android ignore si inexistant)
+        nm.deleteNotificationChannel("temp_status")
     }
 
     fun buildScanNotification(context: Context): Notification =
@@ -56,6 +58,7 @@ object NotificationHelper {
                 .setSmallIcon(icon)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true) // pas de son à chaque mise à jour des 15 min
                 .build()
         )
     }
