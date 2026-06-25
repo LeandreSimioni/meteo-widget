@@ -64,6 +64,8 @@ object NotificationHelper {
                 .setSmallIcon(icon)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
                 .setOnlyAlertOnce(!stateChanged) // son uniquement si changement d'état
                 .build()
         )
