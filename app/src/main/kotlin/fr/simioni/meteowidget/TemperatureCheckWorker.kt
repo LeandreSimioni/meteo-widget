@@ -11,6 +11,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -20,6 +21,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         const val TAG = "TempCheckWorker"
         const val THRESHOLD = 0.5f
         const val BLE_TIMEOUT_SEC = 20L
+        private val mutex = Mutex()
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
@@ -44,6 +46,19 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
     }
 
     override suspend fun doWork(): Result {
+        if (!mutex.tryLock()) {
+            Log.d(TAG, "Cycle déjà en cours, ignoré")
+            LogStore.append(applicationContext, "[Worker] Cycle déjà en cours, ignoré")
+            return Result.success()
+        }
+        try {
+        return doWorkLocked()
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    private suspend fun doWorkLocked(): Result {
         setForeground(getForegroundInfo())
         log("Démarré")
 

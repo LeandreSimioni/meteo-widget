@@ -45,8 +45,6 @@ object NotificationHelper {
     ) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(NOTIF_ALERT_ID_LEGACY)
-        // Annuler puis reposer = nouvelle notif = son/vibration si l'état a changé
-        if (stateChanged) nm.cancel(NOTIF_STATUS_ID)
         val pi = PendingIntent.getActivity(
             context, 0,
             Intent(context, MainActivity::class.java),
