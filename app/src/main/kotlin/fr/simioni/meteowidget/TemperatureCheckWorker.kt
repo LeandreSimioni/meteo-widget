@@ -19,7 +19,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
     companion object {
         const val TAG = "TempCheckWorker"
         const val THRESHOLD = 0.5f
-        const val BLE_TIMEOUT_SEC = 15L
+        const val BLE_TIMEOUT_SEC = 20L
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {

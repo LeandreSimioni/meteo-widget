@@ -3,6 +3,7 @@ package fr.simioni.meteowidget
 import android.app.Service
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -16,7 +17,7 @@ class BleScanService : Service() {
     companion object {
         const val TAG = "BleScanService"
         const val MANUFACTURER_ID = 0x0702
-        const val SCAN_DURATION_MS = 8_000L
+        const val SCAN_DURATION_MS = 15_000L
         const val ACTION_RESULT = "fr.simioni.meteowidget.BLE_RESULT"
         const val ACTION_LOG = "fr.simioni.meteowidget.BLE_LOG"
         const val EXTRA_TEMPERATURE = "temperature"
@@ -54,16 +55,10 @@ class BleScanService : Service() {
             val address = result.device.address
             if (!seenAddresses.add(address)) return
 
-            // device.name requires BLUETOOTH_CONNECT — protect against SecurityException
+            // Le filtre garantit que seul l'Aranet4 (MfID 0x0702) arrive ici
             val name = try { result.device.name } catch (_: SecurityException) { null }
-                ?: result.scanRecord?.deviceName ?: "(sans nom)"
-            val rssi = result.rssi
-            val mfData = result.scanRecord?.manufacturerSpecificData
-            val mfStr = if (mfData != null && mfData.size() > 0)
-                (0 until mfData.size()).joinToString { "0x%04X".format(mfData.keyAt(it)) }
-            else "(aucun)"
-
-            log("[$rssi dBm] $name | MfID: $mfStr")
+                ?: result.scanRecord?.deviceName ?: "Aranet4"
+            log("[${result.rssi} dBm] $name trouvé")
 
             val data = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID) ?: return
 
@@ -117,11 +112,14 @@ class BleScanService : Service() {
             stopSelf()
             return
         }
+        val filter = ScanFilter.Builder()
+            .setManufacturerData(MANUFACTURER_ID, null)
+            .build()
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
         try {
-            scanner.startScan(null, settings, scanCallback)
+            scanner.startScan(listOf(filter), settings, scanCallback)
             log("Scan démarré (${SCAN_DURATION_MS / 1000}s)...")
             Handler(Looper.getMainLooper()).postDelayed({
                 try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
