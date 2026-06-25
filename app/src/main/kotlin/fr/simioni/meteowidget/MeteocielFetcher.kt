@@ -15,6 +15,7 @@ object MeteocielFetcher {
 
     private fun log(ctx: Context, msg: String) {
         Log.d(TAG, msg)
+        LogStore.append(ctx, "[Météo] $msg")
         ctx.sendBroadcast(Intent(BleScanService.ACTION_LOG).apply {
             setPackage(ctx.packageName)
             putExtra(BleScanService.EXTRA_LOG_MSG, "[Météo] $msg")

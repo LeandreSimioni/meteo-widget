@@ -33,6 +33,7 @@ class BleScanService : Service() {
 
     private fun log(msg: String) {
         Log.d(TAG, msg)
+        LogStore.append(this, msg)
         sendBroadcast(Intent(ACTION_LOG).apply {
             setPackage(packageName)
             putExtra(EXTRA_LOG_MSG, msg)

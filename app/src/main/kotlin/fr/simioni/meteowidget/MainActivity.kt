@@ -31,12 +31,16 @@ class MainActivity : AppCompatActivity() {
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private var pendingMonitor = false
+    private var isFirstResume = true
 
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                BleScanService.ACTION_LOG ->
-                    appendLog(intent.getStringExtra(BleScanService.EXTRA_LOG_MSG) ?: return)
+                BleScanService.ACTION_LOG -> {
+                    val msg = intent.getStringExtra(BleScanService.EXTRA_LOG_MSG) ?: return
+                    // LogStore already persisted the line — just update the UI
+                    appendLogToUi(msg)
+                }
                 BleScanService.ACTION_RESULT -> {
                     val temp = intent.getFloatExtra(BleScanService.EXTRA_TEMPERATURE, Float.NaN)
                     if (!temp.isNaN()) setStatus("Indoor: %.1f°C".format(temp), "#2E7D32")
@@ -117,6 +121,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (isFirstResume) {
+            isFirstResume = false
+            val stored = LogStore.getLogs(this)
+            if (stored.isNotEmpty()) {
+                // Prepend persisted background logs before current-session messages
+                val sessionLines = logBuffer.toString()
+                logBuffer.clear()
+                stored.forEach { logBuffer.append("$it\n") }
+                logBuffer.append(sessionLines)
+                logText.text = logBuffer.toString()
+                logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(scanReceiver)
@@ -160,7 +181,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendLog(msg: String) {
+    private fun appendLog(msg: String) = appendLogToUi(msg)
+
+    private fun appendLogToUi(msg: String) {
         val line = "[${timeFmt.format(Date())}] $msg\n"
         logBuffer.append(line)
         runOnUiThread {

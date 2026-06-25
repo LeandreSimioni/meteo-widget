@@ -35,22 +35,27 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         }
     }
 
+    private fun log(msg: String) {
+        Log.d(TAG, msg)
+        LogStore.append(applicationContext, "[Worker] $msg")
+    }
+
     override suspend fun doWork(): Result {
         setForeground(getForegroundInfo())
-        Log.d(TAG, "Worker démarré")
+        log("Démarré")
 
         val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        if (indoorTemp == null) Log.w(TAG, "Aranet hors portée — on continue avec Meteociel")
+        if (indoorTemp == null) log("Aranet hors portée — on continue avec Meteociel")
 
         val outdoorTemp = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature(applicationContext) }
-        if (outdoorTemp == null) Log.w(TAG, "Meteociel indisponible")
+        if (outdoorTemp == null) log("Meteociel indisponible")
 
         if (indoorTemp == null && outdoorTemp == null) {
-            Log.w(TAG, "Aucune donnée disponible")
+            log("Aucune donnée disponible")
             return Result.success()
         }
 
-        Log.d(TAG, "Indoor=${indoorTemp ?: "N/A"} Outdoor=${outdoorTemp ?: "N/A"}")
+        log("Indoor=${indoorTemp?.let { "%.1f°C".format(it) } ?: "N/A"} Outdoor=${outdoorTemp?.let { "%.1f°C".format(it) } ?: "N/A"}")
         saveTemps(indoorTemp, outdoorTemp)
         TemperatureWidgetProvider.updateAll(applicationContext)
 
