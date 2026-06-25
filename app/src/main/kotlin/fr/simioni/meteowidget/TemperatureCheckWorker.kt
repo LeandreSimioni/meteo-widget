@@ -25,7 +25,6 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val notif = NotificationHelper.buildScanNotification(applicationContext)
         return when {
-            // API 34+: SHORT_SERVICE n'a aucun prérequis Bluetooth, parfait pour un Worker de ~20s
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
                 ForegroundInfo(NotificationHelper.NOTIF_SCAN_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
@@ -48,58 +47,44 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         setForeground(getForegroundInfo())
         log("Démarré")
 
-        val indoorTemp = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        if (indoorTemp == null) log("Aranet hors portée — on continue avec Meteociel")
+        val freshIndoor = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
+        val freshOutdoor = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature(applicationContext) }
 
-        val outdoorTemp = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature(applicationContext) }
-        if (outdoorTemp == null) log("Meteociel indisponible")
+        val prefs = Prefs.get(applicationContext)
 
-        if (indoorTemp == null && outdoorTemp == null) {
+        // Persist fresh readings (ne pas écraser si null)
+        prefs.edit().apply {
+            if (freshIndoor != null) putFloat(Prefs.KEY_INDOOR, freshIndoor)
+            if (freshOutdoor != null) putFloat(Prefs.KEY_OUTDOOR, freshOutdoor)
+        }.apply()
+
+        // Utiliser la dernière valeur connue si la lecture fraîche a échoué
+        val indoor = freshIndoor ?: prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN).takeIf { !it.isNaN() }
+        val outdoor = freshOutdoor ?: prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN).takeIf { !it.isNaN() }
+
+        if (freshIndoor == null) log("Aranet hors portée${if (indoor != null) " — dernière valeur: %.1f°C".format(indoor) else ""}")
+        if (freshOutdoor == null) log("Meteociel indisponible${if (outdoor != null) " — dernière valeur: %.1f°C".format(outdoor) else ""}")
+
+        if (indoor == null && outdoor == null) {
             log("Aucune donnée disponible")
             return Result.success()
         }
 
-        log("Indoor=${indoorTemp?.let { "%.1f°C".format(it) } ?: "N/A"} Outdoor=${outdoorTemp?.let { "%.1f°C".format(it) } ?: "N/A"}")
-        saveTemps(indoorTemp, outdoorTemp)
-        TemperatureWidgetProvider.updateAll(applicationContext)
-
-        val openWindows: Boolean? = if (indoorTemp != null && outdoorTemp != null) {
-            val diff = indoorTemp - outdoorTemp
-            sendSmartNotification(indoorTemp, outdoorTemp, diff)
-            when {
-                diff > THRESHOLD  -> true
-                diff < -THRESHOLD -> false
-                else -> null
+        val openWindows: Boolean? = if (indoor != null && outdoor != null) {
+            val diff = indoor - outdoor
+            val state = when {
+                diff > THRESHOLD  -> Prefs.STATE_OPEN
+                diff < -THRESHOLD -> Prefs.STATE_CLOSE
+                else              -> Prefs.STATE_NONE
             }
+            log("%.1f°C dedans · %.1f°C dehors → %s".format(indoor, outdoor, state))
+            prefs.edit().putString(Prefs.KEY_LAST_STATE, state).apply()
+            when (state) { Prefs.STATE_OPEN -> true; Prefs.STATE_CLOSE -> false; else -> null }
         } else null
 
-        NotificationHelper.updateStatusNotification(applicationContext, indoorTemp, outdoorTemp, openWindows)
-
+        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows)
+        TemperatureWidgetProvider.updateAll(applicationContext)
         return Result.success()
-    }
-
-    private fun sendSmartNotification(indoor: Float, outdoor: Float, diff: Float) {
-        val prefs = Prefs.get(applicationContext)
-        val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
-        val newState = when {
-            diff > THRESHOLD  -> Prefs.STATE_OPEN
-            diff < -THRESHOLD -> Prefs.STATE_CLOSE
-            else -> Prefs.STATE_NONE
-        }
-        if (newState != Prefs.STATE_NONE && newState != prevState) {
-            NotificationHelper.showTemperatureAlert(
-                applicationContext, indoor, outdoor,
-                openWindows = (newState == Prefs.STATE_OPEN)
-            )
-        }
-        prefs.edit().putString(Prefs.KEY_LAST_STATE, newState).apply()
-    }
-
-    private fun saveTemps(indoor: Float?, outdoor: Float?) {
-        Prefs.get(applicationContext).edit()
-            .apply { if (indoor != null) putFloat(Prefs.KEY_INDOOR, indoor) }
-            .apply { if (outdoor != null) putFloat(Prefs.KEY_OUTDOOR, outdoor) }
-            .apply()
     }
 
     private fun scanBleForIndoorTemp(): Float? {
