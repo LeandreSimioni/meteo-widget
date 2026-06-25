@@ -19,7 +19,7 @@ object WorkScheduler {
         )
         val oneTime = OneTimeWorkRequestBuilder<TemperatureCheckWorker>().build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            WORK_NAME_NOW, ExistingWorkPolicy.KEEP, oneTime
+            WORK_NAME_NOW, ExistingWorkPolicy.REPLACE, oneTime
         )
     }
 }

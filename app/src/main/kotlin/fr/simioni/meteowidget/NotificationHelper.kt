@@ -11,9 +11,11 @@ import androidx.core.app.NotificationCompat
 object NotificationHelper {
     const val CHANNEL_SCAN = "ble_scan"
     const val CHANNEL_ALERT = "temp_alert"
+    const val CHANNEL_STATUS = "temp_status"
 
     const val NOTIF_SCAN_ID = 1
     const val NOTIF_ALERT_ID = 2
+    const val NOTIF_STATUS_ID = 3
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -22,6 +24,9 @@ object NotificationHelper {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERT, "Alertes température", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_STATUS, "Statut température", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -32,6 +37,31 @@ object NotificationHelper {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .build()
+
+    fun updateStatusNotification(context: Context, indoor: Float?, outdoor: Float?, openWindows: Boolean?) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val pi = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val indoorStr = if (indoor != null) "%.1f°C dedans".format(indoor) else "-- dedans"
+        val outdoorStr = if (outdoor != null) "%.1f°C dehors".format(outdoor) else "-- dehors"
+        val (title, icon) = when (openWindows) {
+            true  -> Pair("↑ Ouvrir les fenêtres", android.R.drawable.arrow_up_float)
+            false -> Pair("↓ Fermer les fenêtres", android.R.drawable.arrow_down_float)
+            null  -> Pair("Meteo Widget", android.R.drawable.ic_menu_compass)
+        }
+        nm.notify(NOTIF_STATUS_ID,
+            NotificationCompat.Builder(context, CHANNEL_STATUS)
+                .setContentTitle(title)
+                .setContentText("$outdoorStr · $indoorStr")
+                .setSmallIcon(icon)
+                .setContentIntent(pi)
+                .setOngoing(true)
+                .build()
+        )
+    }
 
     fun showTemperatureAlert(context: Context, indoor: Float, outdoor: Float, openWindows: Boolean) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

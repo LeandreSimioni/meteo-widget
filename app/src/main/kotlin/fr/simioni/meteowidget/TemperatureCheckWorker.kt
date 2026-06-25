@@ -54,9 +54,17 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         saveTemps(indoorTemp, outdoorTemp)
         TemperatureWidgetProvider.updateAll(applicationContext)
 
-        if (indoorTemp != null && outdoorTemp != null) {
-            sendSmartNotification(indoorTemp, outdoorTemp, indoorTemp - outdoorTemp)
-        }
+        val openWindows: Boolean? = if (indoorTemp != null && outdoorTemp != null) {
+            val diff = indoorTemp - outdoorTemp
+            sendSmartNotification(indoorTemp, outdoorTemp, diff)
+            when {
+                diff > THRESHOLD  -> true
+                diff < -THRESHOLD -> false
+                else -> null
+            }
+        } else null
+
+        NotificationHelper.updateStatusNotification(applicationContext, indoorTemp, outdoorTemp, openWindows)
 
         return Result.success()
     }
@@ -65,7 +73,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         val prefs = Prefs.get(applicationContext)
         val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
         val newState = when {
-            diff > THRESHOLD -> Prefs.STATE_OPEN
+            diff > THRESHOLD  -> Prefs.STATE_OPEN
             diff < -THRESHOLD -> Prefs.STATE_CLOSE
             else -> Prefs.STATE_NONE
         }
