@@ -16,6 +16,44 @@
         android:gravity="center"
         android:padding="12dp" />
 
+    <!-- Code de la station Meteociel utilisée pour la température extérieure -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#222222"
+        android:padding="8dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Station :"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:layout_marginEnd="8dp" />
+
+        <EditText
+            android:id="@+id/stationCodeInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:inputType="number"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#777777"
+            android:hint="ex: 58304005"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnSaveStation"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:text="Enregistrer"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
     <!-- Zone de log, prend tout l'espace disponible -->
     <ScrollView
         android:id="@+id/logScroll"
