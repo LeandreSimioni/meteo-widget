@@ -206,6 +206,7 @@ class MainActivity : AppCompatActivity() {
     private fun requiredPerms() = buildList {
         add(Manifest.permission.BLUETOOTH_SCAN)
         add(Manifest.permission.BLUETOOTH_CONNECT)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             add(Manifest.permission.POST_NOTIFICATIONS)
     }
