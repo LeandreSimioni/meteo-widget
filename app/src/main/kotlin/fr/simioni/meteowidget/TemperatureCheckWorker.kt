@@ -104,6 +104,9 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         } else null
 
         NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged)
+        NotificationHelper.updatePhoneTempNotification(
+            applicationContext, PhoneTemperature.read(applicationContext), indoor, outdoor
+        )
         TemperatureWidgetProvider.updateAll(applicationContext)
         return Result.success()
     }
