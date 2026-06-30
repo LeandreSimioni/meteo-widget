@@ -69,8 +69,6 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
             MeteocielFetcher.fetchOutdoorTemperature(applicationContext, stationCode)
         }
 
-        NotificationHelper.updatePhoneTempNotification(applicationContext, PhoneTemperature.read(applicationContext))
-
         // Persist fresh readings (ne pas écraser si null)
         prefs.edit().apply {
             if (freshIndoor != null) putFloat(Prefs.KEY_INDOOR, freshIndoor)

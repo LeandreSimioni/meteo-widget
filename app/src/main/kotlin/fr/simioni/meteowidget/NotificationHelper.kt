@@ -33,24 +33,26 @@ object NotificationHelper {
         nm.deleteNotificationChannel("temp_status")
     }
 
-    fun updatePhoneTempNotification(context: Context, tempC: Float?) {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (tempC == null) return
+    fun buildPhoneTempNotification(context: Context, tempC: Float?): Notification {
         val pi = PendingIntent.getActivity(
             context, 0,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        nm.notify(NOTIF_PHONE_TEMP_ID,
-            NotificationCompat.Builder(context, CHANNEL_PHONE_TEMP)
-                .setContentTitle("📱 %.1f°C".format(tempC))
-                .setContentText("Température du téléphone")
-                .setSmallIcon(android.R.drawable.ic_lock_idle_low_battery)
-                .setContentIntent(pi)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .build()
-        )
+        return NotificationCompat.Builder(context, CHANNEL_PHONE_TEMP)
+            .setContentTitle(if (tempC != null) "📱 %.1f°C".format(tempC) else "📱 --°C")
+            .setContentText("Température du téléphone")
+            .setSmallIcon(android.R.drawable.ic_lock_idle_low_battery)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+    }
+
+    fun updatePhoneTempNotification(context: Context, tempC: Float?) {
+        if (tempC == null) return
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_PHONE_TEMP_ID, buildPhoneTempNotification(context, tempC))
     }
 
     fun buildScanNotification(context: Context): Notification =

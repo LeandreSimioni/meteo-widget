@@ -9,6 +9,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             WorkScheduler.schedule(context)
             WorkScheduler.runNow(context)
+            context.startForegroundService(Intent(context, PhoneTempMonitorService::class.java))
         }
     }
 }

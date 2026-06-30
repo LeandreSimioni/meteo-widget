@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
             appendLog("Permissions accordées — démarrage du pipeline")
             WorkScheduler.schedule(this)
             WorkScheduler.runNow(this)
+            startForegroundService(Intent(this, PhoneTempMonitorService::class.java))
         } else {
             val permanent = denied.any { !shouldShowRequestPermissionRationale(it) }
             if (permanent) {
@@ -137,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
             WorkScheduler.schedule(this)
+            startForegroundService(Intent(this, PhoneTempMonitorService::class.java))
             requestBatteryOptimizationExemption()
         } else {
             setStatus("Autorisation BLE requise", "#F57F17")
