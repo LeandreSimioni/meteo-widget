@@ -1,17 +1,12 @@
 package fr.simioni.meteowidget
 
-import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.location.Location
-import android.location.LocationManager
 import android.os.Build
 import android.util.Log
-import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -68,12 +63,13 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         log("Démarré")
 
         val freshIndoor = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        val stationCode = resolveStationCode()
+        val prefs = Prefs.get(applicationContext)
+        val stationCode = prefs.getString(Prefs.KEY_STATION_CODE, null) ?: MeteocielFetcher.DEFAULT_STATION_CODE
         val freshOutdoor = withContext(Dispatchers.IO) {
             MeteocielFetcher.fetchOutdoorTemperature(applicationContext, stationCode)
         }
 
-        val prefs = Prefs.get(applicationContext)
+        NotificationHelper.updatePhoneTempNotification(applicationContext, PhoneTemperature.read(applicationContext))
 
         // Persist fresh readings (ne pas écraser si null)
         prefs.edit().apply {
@@ -145,44 +141,5 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         latch.await(BLE_TIMEOUT_SEC, TimeUnit.SECONDS)
         try { applicationContext.unregisterReceiver(receiver) } catch (_: Exception) {}
         return temperature
-    }
-
-    // Choisit la station officielle Météo-France la plus proche de la dernière position connue.
-    // Si la position n'est pas disponible, réutilise la dernière station retenue, ou à défaut
-    // l'ancienne station fixe historique.
-    private fun resolveStationCode(): String {
-        val prefs = Prefs.get(applicationContext)
-        val location = getLastKnownLocation()
-        if (location != null) {
-            val station = StationLocator.nearest(location.latitude, location.longitude)
-            prefs.edit().putString(Prefs.KEY_STATION_CODE, station.code).apply()
-            log("Position connue → station officielle Météo-France ${station.code}")
-            return station.code
-        }
-        val cached = prefs.getString(Prefs.KEY_STATION_CODE, null)
-        return if (cached != null) {
-            log("Position indisponible — réutilise la dernière station: $cached")
-            cached
-        } else {
-            log("Position indisponible — station de repli: ${MeteocielFetcher.FALLBACK_STATION_CODE}")
-            MeteocielFetcher.FALLBACK_STATION_CODE
-        }
-    }
-
-    private fun getLastKnownLocation(): Location? {
-        val ctx = applicationContext
-        val hasPermission = ContextCompat.checkSelfPermission(
-            ctx, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!hasPermission) return null
-
-        val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
-        return try {
-            lm.getProviders(true)
-                .mapNotNull { lm.getLastKnownLocation(it) }
-                .maxByOrNull { it.time }
-        } catch (e: SecurityException) {
-            null
-        }
     }
 }

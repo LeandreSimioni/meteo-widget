@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -117,6 +118,22 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Copié !", Toast.LENGTH_SHORT).show()
         }
 
+        val stationCodeInput = findViewById<EditText>(R.id.stationCodeInput)
+        stationCodeInput.setText(
+            Prefs.get(this).getString(Prefs.KEY_STATION_CODE, null) ?: MeteocielFetcher.DEFAULT_STATION_CODE
+        )
+        findViewById<Button>(R.id.btnSaveStation).setOnClickListener {
+            val code = stationCodeInput.text.toString().trim()
+            if (code.isEmpty()) {
+                Toast.makeText(this, "Code de station vide", Toast.LENGTH_SHORT).show()
+            } else {
+                Prefs.get(this).edit().putString(Prefs.KEY_STATION_CODE, code).apply()
+                appendLog("Station changée manuellement → $code")
+                Toast.makeText(this, "Station enregistrée : $code", Toast.LENGTH_SHORT).show()
+                if (hasPermissions()) WorkScheduler.runNow(this)
+            }
+        }
+
         // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
             WorkScheduler.schedule(this)
@@ -206,7 +223,6 @@ class MainActivity : AppCompatActivity() {
     private fun requiredPerms() = buildList {
         add(Manifest.permission.BLUETOOTH_SCAN)
         add(Manifest.permission.BLUETOOTH_CONNECT)
-        add(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             add(Manifest.permission.POST_NOTIFICATIONS)
     }
