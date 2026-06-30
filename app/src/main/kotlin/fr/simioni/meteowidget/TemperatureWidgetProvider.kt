@@ -55,6 +55,7 @@ class TemperatureWidgetProvider : AppWidgetProvider() {
     override fun onEnabled(context: Context) {
         // Premier widget ajouté à l'écran d'accueil : démarre WorkManager automatiquement
         WorkScheduler.schedule(context)
+        context.startForegroundService(Intent(context, PhoneTempMonitorService::class.java))
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
