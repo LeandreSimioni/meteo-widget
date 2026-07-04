@@ -70,3 +70,12 @@ foi sur la compilation réelle.
   Reste à confirmer par l'utilisateur en conditions réelles : permission de
   localisation accordée, logs `[Worker] Position connue → station officielle
   Météo-France ...` visibles dans l'app après réinstallation.
+
+## Mise à jour (4 juillet 2026)
+
+- L'utilisateur a déménagé de Varzy à Avignon. `DEFAULT_STATION_CODE` passe de
+  `58304005` à `7563` (station Avignon sur meteociel.fr). Rappel : ce
+  changement n'affecte que les installs qui n'ont jamais enregistré de code
+  via le champ "Code de station" de `MainActivity` — un utilisateur qui a déjà
+  sauvegardé une valeur dans `Prefs.KEY_STATION_CODE` doit la changer
+  manuellement dans l'app (ou via `btnSaveStation`).
