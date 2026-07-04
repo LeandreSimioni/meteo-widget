@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import org.jsoup.Jsoup
+import org.jsoup.select.Elements
 import java.util.Calendar
 
 object MeteocielFetcher {
@@ -46,15 +47,22 @@ object MeteocielFetcher {
             val rows = doc.select("table tr")
             log(ctx, "${rows.size} lignes — début réponse: ${doc.body()?.text()?.take(120) ?: "(vide)"}")
 
-            // Tableau anti-chronologique — première ligne avec heure ET température valide
+            // Tableau anti-chronologique — première ligne avec heure ET température valide.
+            // Le nombre et l'ordre des colonnes varient selon le type de station (ex: Avignon,
+            // station synop complète, a "Néb./Temps/Visi" avant la température ; d'autres
+            // stations plus simples n'ont pas ces colonnes) — on repère donc la cellule de
+            // température par son suffixe "°C" plutôt que par un index fixe.
+            fun tempCellOf(cells: Elements) =
+                cells.drop(1).firstOrNull { cell ->
+                    cell.text().contains("°C") &&
+                        cell.text().replace("°C", "").replace(",", ".").trim()
+                            .toFloatOrNull()?.let { it in -50f..60f } == true
+                }
+
             val dataRow = rows.firstOrNull { row ->
                 val cells = row.select("td")
-                if (cells.size < 3) return@firstOrNull false
-                val timeOk = timePattern.matches(cells[0].text().trim())
-                val tempOk = cells.getOrNull(2)?.text()
-                    ?.replace("°C", "")?.replace(",", ".")?.trim()
-                    ?.toFloatOrNull()?.let { it in -50f..60f } == true
-                timeOk && tempOk
+                if (cells.size < 2) return@firstOrNull false
+                timePattern.matches(cells[0].text().trim()) && tempCellOf(cells) != null
             } ?: run {
                 log(ctx, "ERREUR: aucun relevé valide trouvé")
                 return null
@@ -62,7 +70,7 @@ object MeteocielFetcher {
 
             val cells = dataRow.select("td")
             val timeStr = cells[0].text()
-            val temp = cells[2].text()
+            val temp = tempCellOf(cells)!!.text()
                 .replace("°C", "").replace(",", ".").trim()
                 .toFloat()
 
