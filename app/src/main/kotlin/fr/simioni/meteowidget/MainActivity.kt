@@ -21,6 +21,8 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,6 +81,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         NotificationHelper.createChannels(this)
+
+        // targetSdk 35 force l'affichage edge-to-edge : sans ça, le contenu se dessine
+        // sous la barre de statut système et le haut de l'écran (statusText, champ station)
+        // devient invisible.
+        val root = findViewById<android.widget.LinearLayout>(R.id.rootLayout)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
+        val versionName = packageManager.getPackageInfo(packageName, 0).versionName
+        title = "${getString(R.string.app_name)} v$versionName"
 
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
