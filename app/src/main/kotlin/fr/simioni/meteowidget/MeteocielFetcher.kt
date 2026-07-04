@@ -9,8 +9,8 @@ import java.util.Calendar
 object MeteocielFetcher {
     private const val TAG = "MeteocielFetcher"
     private const val BASE_URL = "https://www.meteociel.fr/temps-reel/obs_villes.php"
-    // Station par défaut (Varzy) — utilisée tant que l'utilisateur n'en a pas choisi une autre.
-    const val DEFAULT_STATION_CODE = "58304005"
+    // Station par défaut (Avignon) — utilisée tant que l'utilisateur n'en a pas choisi une autre.
+    const val DEFAULT_STATION_CODE = "7563"
 
     private val timePattern = Regex("""^\d{1,2}h\d{2}$""")
 
