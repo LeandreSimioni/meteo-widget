@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
+    private lateinit var locationButton: Button
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -81,6 +82,9 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
         logScroll = findViewById(R.id.logScroll)
+        locationButton = findViewById(R.id.btnLocation)
+        locationButton.setOnClickListener { showLocationPicker() }
+        refreshLocationButton()
 
         val filter = IntentFilter().apply {
             addAction(BleScanService.ACTION_LOG)
@@ -165,7 +169,36 @@ class MainActivity : AppCompatActivity() {
             Prefs.STATE_CLOSE -> " · ↓ Fermer"
             else -> ""
         }
-        setStatus("$indoorStr dedans · $outdoorStr dehors$advice", "#1565C0")
+        setStatus("$indoorStr dedans · $outdoorStr ${Prefs.getLocation(this).label}$advice", "#1565C0")
+    }
+
+    private fun refreshLocationButton() {
+        val loc = Prefs.getLocation(this)
+        locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel})"
+    }
+
+    private fun showLocationPicker() {
+        val options = WeatherLocation.entries
+        val current = Prefs.getLocation(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Température extérieure")
+            .setSingleChoiceItems(
+                options.map { "${it.label}\n${it.sourceLabel}" }.toTypedArray(),
+                options.indexOf(current)
+            ) { dialog, which ->
+                dialog.dismiss()
+                val chosen = options[which]
+                if (chosen != current) {
+                    Prefs.setLocation(this, chosen)
+                    appendLog("Lieu → ${chosen.label} (${chosen.sourceLabel})")
+                    refreshLocationButton()
+                    showTemps()
+                    TemperatureWidgetProvider.updateAll(this)
+                    if (hasPermissions()) WorkScheduler.runNow(this)
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
     }
 
     private fun requestPermsOrSettings() {

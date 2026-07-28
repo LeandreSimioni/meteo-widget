@@ -62,8 +62,9 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         setForeground(getForegroundInfo())
         log("Démarré")
 
+        val location = Prefs.getLocation(applicationContext)
         val freshIndoor = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        val freshOutdoor = withContext(Dispatchers.IO) { MeteocielFetcher.fetchOutdoorTemperature(applicationContext) }
+        val freshOutdoor = withContext(Dispatchers.IO) { location.fetchOutdoorTemperature(applicationContext) }
 
         val prefs = Prefs.get(applicationContext)
 
@@ -78,7 +79,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         val outdoor = freshOutdoor ?: prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN).takeIf { !it.isNaN() }
 
         if (freshIndoor == null) log("Aranet hors portée${if (indoor != null) " — dernière valeur: %.1f°C".format(indoor) else ""}")
-        if (freshOutdoor == null) log("Meteociel indisponible${if (outdoor != null) " — dernière valeur: %.1f°C".format(outdoor) else ""}")
+        if (freshOutdoor == null) log("${location.label} indisponible${if (outdoor != null) " — dernière valeur: %.1f°C".format(outdoor) else ""}")
 
         if (indoor == null && outdoor == null) {
             log("Aucune donnée disponible")
@@ -101,7 +102,7 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
             when (state) { Prefs.STATE_OPEN -> true; Prefs.STATE_CLOSE -> false; else -> null }
         } else null
 
-        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged)
+        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged, location)
         TemperatureWidgetProvider.updateAll(applicationContext)
         return Result.success()
     }

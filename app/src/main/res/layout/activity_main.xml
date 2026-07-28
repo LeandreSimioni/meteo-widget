@@ -16,6 +16,14 @@
         android:gravity="center"
         android:padding="12dp" />
 
+    <!-- Lieu de la mesure extérieure -->
+    <Button
+        android:id="@+id/btnLocation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Lieu : —"
+        android:textSize="13sp" />
+
     <!-- Zone de log, prend tout l'espace disponible -->
     <ScrollView
         android:id="@+id/logScroll"

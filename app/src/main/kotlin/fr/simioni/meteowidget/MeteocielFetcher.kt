@@ -9,7 +9,6 @@ import java.util.Calendar
 object MeteocielFetcher {
     private const val TAG = "MeteocielFetcher"
     private const val BASE_URL = "https://www.meteociel.fr/temps-reel/obs_villes.php"
-    private const val STATION_CODE = "7563"
 
     private val timePattern = Regex("""^\d{1,2}h\d{2}$""")
 
@@ -22,10 +21,10 @@ object MeteocielFetcher {
         })
     }
 
-    fun fetchOutdoorTemperature(ctx: Context): Float? {
+    fun fetchOutdoorTemperature(ctx: Context, station: String): Float? {
         return try {
             val cal = Calendar.getInstance()
-            val url = "$BASE_URL?affint=1&code2=$STATION_CODE" +
+            val url = "$BASE_URL?affint=1&code2=$station" +
                 "&jour2=${cal.get(Calendar.DAY_OF_MONTH)}" +
                 "&mois2=${cal.get(Calendar.MONTH)}" +
                 "&annee2=${cal.get(Calendar.YEAR)}"
