@@ -14,6 +14,17 @@ import android.os.Looper
 class PhoneTempMonitorService : Service() {
     companion object {
         private const val INTERVAL_MS = 60_000L
+
+        // Mêmes règles de péremption que le Worker : la notification ne doit pas
+        // afficher comme actuelle une valeur que l'app juge trop vieille pour agir.
+        private fun freshIndoor(ctx: Service): Float? =
+            Prefs.getIndoor(ctx)?.takeIf { it.isFresh(Reading.MAX_AGE_INDOOR_MS) }?.value
+
+        private fun freshOutdoor(ctx: Service): Float? =
+            Prefs.getOutdoor(ctx)?.takeIf { it.isFresh(Reading.MAX_AGE_OUTDOOR_MS) }?.value
+
+        private fun currentState(ctx: Service): String =
+            Prefs.get(ctx).getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -30,23 +41,22 @@ class PhoneTempMonitorService : Service() {
             }
             // Intérieur/extérieur restent sur leur cycle de 15 min (Aranet + Meteociel) —
             // on relit juste la dernière valeur connue, sans déclencher de nouvelle mesure.
-            val prefs = Prefs.get(this@PhoneTempMonitorService)
-            val indoor = prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN).takeIf { !it.isNaN() }
-            val outdoor = prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN).takeIf { !it.isNaN() }
-            NotificationHelper.updatePhoneTempNotification(this@PhoneTempMonitorService, temp, indoor, outdoor)
+            val ctx = this@PhoneTempMonitorService
+            NotificationHelper.updateStatusNotification(
+                ctx, temp, freshIndoor(ctx), freshOutdoor(ctx), currentState(ctx)
+            )
             handler.postDelayed(this, INTERVAL_MS)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val prefs = Prefs.get(this)
-        val indoor = prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN).takeIf { !it.isNaN() }
-        val outdoor = prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN).takeIf { !it.isNaN() }
-        val notif = NotificationHelper.buildPhoneTempNotification(this, PhoneTemperature.read(this), indoor, outdoor)
+        val notif = NotificationHelper.buildStatusNotification(
+            this, PhoneTemperature.read(this), freshIndoor(this), freshOutdoor(this), currentState(this)
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NotificationHelper.NOTIF_PHONE_TEMP_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            startForeground(NotificationHelper.NOTIF_STATUS_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            startForeground(NotificationHelper.NOTIF_PHONE_TEMP_ID, notif)
+            startForeground(NotificationHelper.NOTIF_STATUS_ID, notif)
         }
         handler.removeCallbacks(tick)
         handler.post(tick)
