@@ -10,50 +10,31 @@ import androidx.core.app.NotificationCompat
 
 object NotificationHelper {
     const val CHANNEL_SCAN = "ble_scan"
-    const val CHANNEL_STATUS = "temp_status_v2" // v2 = importance DEFAULT (l'ancien était LOW/silencieux)
-    const val CHANNEL_PHONE_TEMP = "phone_temp"
+
+    // v3 : canal unique. Les deux précédents (statut + température téléphone) affichaient
+    // deux notifications côte à côte pour la même information. Nouvel identifiant car
+    // Android ignore un changement d'importance sur un canal déjà créé.
+    const val CHANNEL_STATUS = "temp_status_v3"
 
     const val NOTIF_SCAN_ID = 1
-    const val NOTIF_STATUS_ID = 3
-    const val NOTIF_PHONE_TEMP_ID = 4
-    private const val NOTIF_ALERT_ID_LEGACY = 2
+    const val NOTIF_STATUS_ID = 4
+
+    // Notifications d'anciennes versions, à effacer au démarrage.
+    private val LEGACY_NOTIF_IDS = intArrayOf(2, 3)
+    private val LEGACY_CHANNELS = arrayOf("temp_status", "temp_status_v2", "phone_temp")
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_SCAN, "Scan BLE", NotificationManager.IMPORTANCE_LOW)
         )
+        // DEFAULT et non LOW : la notification reste muette en temps normal
+        // (setOnlyAlertOnce), mais doit pouvoir sonner sur un changement de conseil.
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_STATUS, "Statut température", NotificationManager.IMPORTANCE_DEFAULT)
+            NotificationChannel(CHANNEL_STATUS, "Températures", NotificationManager.IMPORTANCE_DEFAULT)
         )
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_PHONE_TEMP, "Température téléphone", NotificationManager.IMPORTANCE_LOW)
-        )
-        // Supprimer l'ancien canal silencieux (Android ignore si inexistant)
-        nm.deleteNotificationChannel("temp_status")
-    }
-
-    fun buildPhoneTempNotification(context: Context, phoneC: Float?, indoorC: Float?, outdoorC: Float?): Notification {
-        val pi = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        fun fmt(v: Float?) = if (v != null) "%.1f°C".format(v) else "--°C"
-        val title = "📱 ${fmt(phoneC)}   🏠 ${fmt(indoorC)}   🌳 ${fmt(outdoorC)}"
-        return NotificationCompat.Builder(context, CHANNEL_PHONE_TEMP)
-            .setContentTitle(title)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_low_battery)
-            .setContentIntent(pi)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .build()
-    }
-
-    fun updatePhoneTempNotification(context: Context, phoneC: Float?, indoorC: Float?, outdoorC: Float?) {
-        if (phoneC == null && indoorC == null && outdoorC == null) return
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_PHONE_TEMP_ID, buildPhoneTempNotification(context, phoneC, indoorC, outdoorC))
+        LEGACY_NOTIF_IDS.forEach { nm.cancel(it) }
+        LEGACY_CHANNELS.forEach { nm.deleteNotificationChannel(it) }
     }
 
     fun buildScanNotification(context: Context): Notification =
@@ -64,44 +45,57 @@ object NotificationHelper {
             .setOngoing(true)
             .build()
 
-    fun updateStatusNotification(
+    /**
+     * L'unique notification de l'app : les trois températures, plus une flèche
+     * quand il y a quelque chose à faire des fenêtres.
+     *
+     * Elle sert aussi de notification de service foreground à
+     * [PhoneTempMonitorService], d'où l'absence de sous-texte : le titre doit se
+     * suffire à lui-même dans la barre.
+     */
+    fun buildStatusNotification(
         context: Context,
-        indoor: Reading?,
-        outdoor: Reading?,
-        openWindows: Boolean?,
-        stateChanged: Boolean = false,
-        location: WeatherLocation = WeatherLocation.DEFAULT
-    ) {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(NOTIF_ALERT_ID_LEGACY)
+        phoneC: Float?,
+        indoorC: Float?,
+        outdoorC: Float?,
+        state: String = Prefs.STATE_NONE,
+        alert: Boolean = false,
+    ): Notification {
         val pi = PendingIntent.getActivity(
             context, 0,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val indoorStr = if (indoor != null) "%.1f°C dedans".format(indoor.value) else "-- dedans"
-        val outdoorStr = if (outdoor != null) "%.1f°C dehors (${location.label})".format(outdoor.value)
-                         else "-- dehors (${location.label})"
-        // L'âge de la mesure la plus ancienne : c'est elle qui limite la confiance
-        // qu'on peut accorder au conseil affiché.
-        val oldest = listOfNotNull(indoor, outdoor).maxByOrNull { it.ageMs() }
-        val ageStr = oldest?.let { " · ${Reading.formatAge(it.ageMs())}" } ?: ""
-        val (title, icon) = when (openWindows) {
-            true  -> Pair("↑ Ouvrir les fenêtres", android.R.drawable.arrow_up_float)
-            false -> Pair("↓ Fermer les fenêtres", android.R.drawable.arrow_down_float)
-            null  -> Pair("Meteo Widget · en attente", android.R.drawable.ic_menu_compass)
+        fun fmt(v: Float?) = if (v != null) "%.1f°C".format(v) else "--°C"
+
+        // Flèche en tête de ligne : c'est l'information qui demande une action,
+        // elle doit être lue en premier et survivre à une troncature du titre.
+        val (arrow, icon) = when (state) {
+            Prefs.STATE_OPEN -> "↑ " to android.R.drawable.arrow_up_float
+            Prefs.STATE_CLOSE -> "↓ " to android.R.drawable.arrow_down_float
+            else -> "" to android.R.drawable.ic_lock_idle_low_battery
         }
-        nm.notify(NOTIF_STATUS_ID,
-            NotificationCompat.Builder(context, CHANNEL_STATUS)
-                .setContentTitle(title)
-                .setContentText("$outdoorStr · $indoorStr$ageStr")
-                .setSmallIcon(icon)
-                .setContentIntent(pi)
-                .setOngoing(true)
-                .setWhen(System.currentTimeMillis())
-                .setShowWhen(true)
-                .setOnlyAlertOnce(!stateChanged) // son uniquement si changement d'état
-                .build()
-        )
+        val title = "$arrow📱 ${fmt(phoneC)}   🏠 ${fmt(indoorC)}   🌳 ${fmt(outdoorC)}"
+
+        return NotificationCompat.Builder(context, CHANNEL_STATUS)
+            .setContentTitle(title)
+            .setSmallIcon(icon)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(!alert) // son uniquement sur changement de conseil
+            .build()
+    }
+
+    fun updateStatusNotification(
+        context: Context,
+        phoneC: Float?,
+        indoorC: Float?,
+        outdoorC: Float?,
+        state: String = Prefs.STATE_NONE,
+        alert: Boolean = false,
+    ) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_STATUS_ID, buildStatusNotification(context, phoneC, indoorC, outdoorC, state, alert))
     }
 }

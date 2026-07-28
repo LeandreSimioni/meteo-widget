@@ -82,28 +82,31 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
         if (indoor == null && outdoor == null) {
             log("Aucune donnée exploitable")
-            NotificationHelper.updateStatusNotification(applicationContext, null, null, null, false, location)
+            NotificationHelper.updateStatusNotification(
+                applicationContext, PhoneTemperature.read(applicationContext), null, null
+            )
             TemperatureWidgetProvider.updateAll(applicationContext)
             return Result.success()
         }
 
         var stateChanged = false
-        val openWindows: Boolean? = if (indoor != null && outdoor != null) {
+        var state = Prefs.STATE_NONE
+        if (indoor != null && outdoor != null) {
             val previous = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
             val advice = WindowAdvisor.advise(indoor.value, outdoor.value, previous)
             log("%.1f°C dedans · %.1f°C dehors → %s".format(indoor.value, outdoor.value, advice.state))
             stateChanged = advice.alert
-            prefs.edit().putString(Prefs.KEY_LAST_STATE, advice.state).apply()
-            when (advice.state) {
-                Prefs.STATE_OPEN -> true
-                Prefs.STATE_CLOSE -> false
-                else -> null
-            }
-        } else null
+            state = advice.state
+            prefs.edit().putString(Prefs.KEY_LAST_STATE, state).apply()
+        }
 
-        NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged, location)
-        NotificationHelper.updatePhoneTempNotification(
-            applicationContext, PhoneTemperature.read(applicationContext), indoor?.value, outdoor?.value
+        NotificationHelper.updateStatusNotification(
+            applicationContext,
+            PhoneTemperature.read(applicationContext),
+            indoor?.value,
+            outdoor?.value,
+            state,
+            stateChanged,
         )
         TemperatureWidgetProvider.updateAll(applicationContext)
         return Result.success()

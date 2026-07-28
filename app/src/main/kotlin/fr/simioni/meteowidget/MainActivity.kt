@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -94,6 +95,11 @@ class MainActivity : AppCompatActivity() {
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
+        // La zone de la barre de statut prend le fond de la fenêtre. Le thème étant
+        // clair, l'heure et les icônes système — blanches en mode sombre — devenaient
+        // illisibles. On force un fond sombre derrière, et des icônes claires, pour
+        // que la barre ressemble à ce qu'elle est partout ailleurs sur le téléphone.
+        WindowInsetsControllerCompat(window, root).isAppearanceLightStatusBars = false
 
         val versionName = packageManager.getPackageInfo(packageName, 0).versionName
         title = "${getString(R.string.app_name)} v$versionName"
