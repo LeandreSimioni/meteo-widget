@@ -68,12 +68,14 @@ object NotificationHelper {
         )
         fun fmt(v: Float?) = if (v != null) "%.1f°C".format(v) else "--°C"
 
+        // Flèche en tête de ligne : c'est l'information qui demande une action,
+        // elle doit être lue en premier et survivre à une troncature du titre.
         val (arrow, icon) = when (state) {
-            Prefs.STATE_OPEN -> " ↑" to android.R.drawable.arrow_up_float
-            Prefs.STATE_CLOSE -> " ↓" to android.R.drawable.arrow_down_float
+            Prefs.STATE_OPEN -> "↑ " to android.R.drawable.arrow_up_float
+            Prefs.STATE_CLOSE -> "↓ " to android.R.drawable.arrow_down_float
             else -> "" to android.R.drawable.ic_lock_idle_low_battery
         }
-        val title = "📱 ${fmt(phoneC)}   🏠 ${fmt(indoorC)}   🌳 ${fmt(outdoorC)}$arrow"
+        val title = "$arrow📱 ${fmt(phoneC)}   🏠 ${fmt(indoorC)}   🌳 ${fmt(outdoorC)}"
 
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setContentTitle(title)
