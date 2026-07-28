@@ -10,14 +10,18 @@ import java.util.Calendar
 /**
  * Observations temps réel de Meteociel (scraping du tableau horaire).
  *
- * La colonne de température est repérée par l'en-tête du tableau, pas par un
- * index en dur : la version précédente lisait la 3ᵉ colonne, qui est en fait
- * une colonne de pictogramme vide, et ne renvoyait donc jamais rien. Un
- * repli par motif ("30 °C") couvre le cas où l'en-tête changerait de libellé.
+ * Le nombre de colonnes varie selon le type de station (Avignon, station synop
+ * complète, a "Néb./Temps/Visi" avant la température ; d'autres stations non),
+ * donc jamais d'index en dur. La colonne est repérée par l'en-tête du tableau,
+ * avec un repli par motif ("30 °C") si le libellé change. Le repli tolère un
+ * caractère degré mal décodé — la page est servie en ISO-8859-1.
  */
 object MeteocielFetcher {
     private const val TAG = "MeteocielFetcher"
     private const val BASE_URL = "https://www.meteociel.fr/temps-reel/obs_villes.php"
+
+    // Station par défaut (Avignon) — utilisée tant que l'utilisateur n'en a pas choisi une autre.
+    const val DEFAULT_STATION_CODE = "7563"
 
     private val timePattern = Regex("""^(\d{1,2})h(\d{2})$""")
 
@@ -33,10 +37,12 @@ object MeteocielFetcher {
         })
     }
 
-    suspend fun fetchOutdoorTemperature(ctx: Context, station: String): Reading? {
+    suspend fun fetchOutdoorTemperature(ctx: Context, stationCode: String): Reading? {
         return try {
             val cal = Calendar.getInstance()
-            val url = "$BASE_URL?affint=1&code2=$station" +
+            // meteociel attend le code sans zéro initial (ex: station officielle "07156" → 7156)
+            val code2 = stationCode.toIntOrNull()?.toString() ?: stationCode
+            val url = "$BASE_URL?affint=1&code2=$code2" +
                 "&jour2=${cal.get(Calendar.DAY_OF_MONTH)}" +
                 "&mois2=${cal.get(Calendar.MONTH)}" +
                 "&annee2=${cal.get(Calendar.YEAR)}"

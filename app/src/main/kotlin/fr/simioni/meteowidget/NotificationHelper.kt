@@ -11,9 +11,11 @@ import androidx.core.app.NotificationCompat
 object NotificationHelper {
     const val CHANNEL_SCAN = "ble_scan"
     const val CHANNEL_STATUS = "temp_status_v2" // v2 = importance DEFAULT (l'ancien était LOW/silencieux)
+    const val CHANNEL_PHONE_TEMP = "phone_temp"
 
     const val NOTIF_SCAN_ID = 1
     const val NOTIF_STATUS_ID = 3
+    const val NOTIF_PHONE_TEMP_ID = 4
     private const val NOTIF_ALERT_ID_LEGACY = 2
 
     fun createChannels(context: Context) {
@@ -24,8 +26,34 @@ object NotificationHelper {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_STATUS, "Statut température", NotificationManager.IMPORTANCE_DEFAULT)
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_PHONE_TEMP, "Température téléphone", NotificationManager.IMPORTANCE_LOW)
+        )
         // Supprimer l'ancien canal silencieux (Android ignore si inexistant)
         nm.deleteNotificationChannel("temp_status")
+    }
+
+    fun buildPhoneTempNotification(context: Context, phoneC: Float?, indoorC: Float?, outdoorC: Float?): Notification {
+        val pi = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        fun fmt(v: Float?) = if (v != null) "%.1f°C".format(v) else "--°C"
+        val title = "📱 ${fmt(phoneC)}   🏠 ${fmt(indoorC)}   🌳 ${fmt(outdoorC)}"
+        return NotificationCompat.Builder(context, CHANNEL_PHONE_TEMP)
+            .setContentTitle(title)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_low_battery)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+    }
+
+    fun updatePhoneTempNotification(context: Context, phoneC: Float?, indoorC: Float?, outdoorC: Float?) {
+        if (phoneC == null && indoorC == null && outdoorC == null) return
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_PHONE_TEMP_ID, buildPhoneTempNotification(context, phoneC, indoorC, outdoorC))
     }
 
     fun buildScanNotification(context: Context): Notification =

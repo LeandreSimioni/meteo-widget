@@ -55,6 +55,10 @@ class TemperatureWidgetProvider : AppWidgetProvider() {
             views.setTextColor(R.id.widgetIndoor, tint(indoor, Reading.MAX_AGE_INDOOR_MS, COLOR_INDOOR))
             views.setTextColor(R.id.widgetOutdoor, tint(outdoor, Reading.MAX_AGE_OUTDOOR_MS, COLOR_OUTDOOR))
 
+            val phoneTemp = PhoneTemperature.read(context)
+            views.setTextViewText(R.id.widgetPhoneTemp,
+                if (phoneTemp == null) "" else "📱%.0f°C".format(phoneTemp))
+
             val pi = PendingIntent.getActivity(
                 context, 0,
                 Intent(context, MainActivity::class.java),
@@ -68,6 +72,7 @@ class TemperatureWidgetProvider : AppWidgetProvider() {
     override fun onEnabled(context: Context) {
         // Premier widget ajouté à l'écran d'accueil : démarre WorkManager automatiquement
         WorkScheduler.schedule(context)
+        context.startForegroundService(Intent(context, PhoneTempMonitorService::class.java))
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {

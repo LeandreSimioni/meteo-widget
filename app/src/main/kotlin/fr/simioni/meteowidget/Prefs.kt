@@ -10,6 +10,9 @@ object Prefs {
     private const val KEY_OUTDOOR_TS = "outdoor_temp_ts"
     const val KEY_LAST_STATE = "last_state"
     const val KEY_LOCATION = "location"
+    // v2 : la v1 était écrite automatiquement par l'ancienne sélection GPS (peu fiable,
+    // ex. station 07260 sans relevé) — nouvelle clé pour repartir sur la station par défaut.
+    const val KEY_STATION_CODE = "station_code_v2"
     const val STATE_NONE = "NONE"
     const val STATE_OPEN = "OPEN"
     const val STATE_CLOSE = "CLOSE"
@@ -45,6 +48,20 @@ object Prefs {
 
     fun getLocation(context: Context): WeatherLocation =
         WeatherLocation.fromId(get(context).getString(KEY_LOCATION, null))
+
+    /** Code de station Meteociel saisi par l'utilisateur, ou la station par défaut. */
+    fun getStationCode(context: Context): String =
+        get(context).getString(KEY_STATION_CODE, null)?.takeIf { it.isNotBlank() }
+            ?: MeteocielFetcher.DEFAULT_STATION_CODE
+
+    fun setStationCode(context: Context, code: String) {
+        get(context).edit()
+            .putString(KEY_STATION_CODE, code.trim())
+            .remove(KEY_OUTDOOR)
+            .remove(KEY_OUTDOOR_TS)
+            .putString(KEY_LAST_STATE, STATE_NONE)
+            .apply()
+    }
 
     /**
      * Change de lieu et repart de zéro côté extérieur : l'ancienne température

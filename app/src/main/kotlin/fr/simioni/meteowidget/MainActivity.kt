@@ -14,12 +14,15 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -30,6 +33,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
     private lateinit var locationButton: Button
+    private lateinit var stationCodeInput: EditText
+    private lateinit var stationCodeRow: android.view.View
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -54,6 +59,7 @@ class MainActivity : AppCompatActivity() {
             appendLog("Permissions accordées — démarrage du pipeline")
             WorkScheduler.schedule(this)
             WorkScheduler.runNow(this)
+            startForegroundService(Intent(this, PhoneTempMonitorService::class.java))
         } else {
             val permanent = denied.any { !shouldShowRequestPermissionRationale(it) }
             if (permanent) {
@@ -78,6 +84,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         NotificationHelper.createChannels(this)
+
+        // targetSdk 35 force l'affichage edge-to-edge : sans ça, le contenu se dessine
+        // sous la barre de statut système et le haut de l'écran (statusText, champ station)
+        // devient invisible.
+        val root = findViewById<android.widget.LinearLayout>(R.id.rootLayout)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
+        val versionName = packageManager.getPackageInfo(packageName, 0).versionName
+        title = "${getString(R.string.app_name)} v$versionName"
 
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
@@ -122,9 +141,28 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Copié !", Toast.LENGTH_SHORT).show()
         }
 
+        stationCodeInput = findViewById(R.id.stationCodeInput)
+        stationCodeRow = findViewById(R.id.stationCodeRow)
+        stationCodeInput.setText(Prefs.getStationCode(this))
+        findViewById<Button>(R.id.btnSaveStation).setOnClickListener {
+            val code = stationCodeInput.text.toString().trim()
+            if (code.isEmpty()) {
+                Toast.makeText(this, "Code de station vide", Toast.LENGTH_SHORT).show()
+            } else {
+                Prefs.setStationCode(this, code)
+                appendLog("Station changée manuellement → $code")
+                Toast.makeText(this, "Station enregistrée : $code", Toast.LENGTH_SHORT).show()
+                refreshLocationButton()
+                showTemps()
+                if (hasPermissions()) WorkScheduler.runNow(this)
+            }
+        }
+        refreshStationRow()
+
         // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
             WorkScheduler.schedule(this)
+            startForegroundService(Intent(this, PhoneTempMonitorService::class.java))
             requestBatteryOptimizationExemption()
         } else {
             setStatus("Autorisation BLE requise", "#F57F17")
@@ -189,7 +227,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshLocationButton() {
         val loc = Prefs.getLocation(this)
-        locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel})"
+        locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel(this)})"
+    }
+
+    /** Le code de station ne concerne que Meteociel : inutile de l'afficher pour Cordovado. */
+    private fun refreshStationRow() {
+        stationCodeRow.visibility =
+            if (Prefs.getLocation(this).usesStationCode) android.view.View.VISIBLE
+            else android.view.View.GONE
     }
 
     /** Sans ça, impossible de savoir quelle build tourne sur le téléphone. */
@@ -206,15 +251,16 @@ class MainActivity : AppCompatActivity() {
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Température extérieure")
             .setSingleChoiceItems(
-                options.map { "${it.label}\n${it.sourceLabel}" }.toTypedArray(),
+                options.map { "${it.label}\n${it.sourceLabel(this)}" }.toTypedArray(),
                 options.indexOf(current)
             ) { dialog, which ->
                 dialog.dismiss()
                 val chosen = options[which]
                 if (chosen != current) {
                     Prefs.setLocation(this, chosen)
-                    appendLog("Lieu → ${chosen.label} (${chosen.sourceLabel})")
+                    appendLog("Lieu → ${chosen.label} (${chosen.sourceLabel(this)})")
                     refreshLocationButton()
+                    refreshStationRow()
                     showTemps()
                     TemperatureWidgetProvider.updateAll(this)
                     if (hasPermissions()) WorkScheduler.runNow(this)
