@@ -41,7 +41,8 @@ object NotificationHelper {
         indoor: Float?,
         outdoor: Float?,
         openWindows: Boolean?,
-        stateChanged: Boolean = false
+        stateChanged: Boolean = false,
+        location: WeatherLocation = WeatherLocation.DEFAULT
     ) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(NOTIF_ALERT_ID_LEGACY)
@@ -51,7 +52,8 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val indoorStr = if (indoor != null) "%.1f°C dedans".format(indoor) else "-- dedans"
-        val outdoorStr = if (outdoor != null) "%.1f°C dehors".format(outdoor) else "-- dehors"
+        val outdoorStr = if (outdoor != null) "%.1f°C dehors (${location.label})".format(outdoor)
+                         else "-- dehors (${location.label})"
         val (title, icon) = when (openWindows) {
             true  -> Pair("↑ Ouvrir les fenêtres", android.R.drawable.arrow_up_float)
             false -> Pair("↓ Fermer les fenêtres", android.R.drawable.arrow_down_float)

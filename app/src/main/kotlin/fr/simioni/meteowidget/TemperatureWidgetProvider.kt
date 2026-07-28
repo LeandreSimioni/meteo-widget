@@ -32,6 +32,8 @@ class TemperatureWidgetProvider : AppWidgetProvider() {
                 if (indoor.isNaN()) "--°C" else "%.1f°C".format(indoor))
             views.setTextViewText(R.id.widgetOutdoor,
                 if (outdoor.isNaN()) "--°C" else "%.1f°C".format(outdoor))
+            views.setTextViewText(R.id.widgetOutdoorLabel,
+                "extérieur · ${Prefs.getLocation(context).label}")
             views.setTextViewText(R.id.widgetStatus, when (state) {
                 Prefs.STATE_OPEN -> "↑ Ouvrir"
                 Prefs.STATE_CLOSE -> "↓ Fermer"
