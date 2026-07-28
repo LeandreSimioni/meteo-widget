@@ -37,6 +37,15 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug
 
+      # Le tag "latest" est glissant : il ne dit pas quelle version il contient.
+      # UpdateChecker lit ces deux lignes dans le corps de la release pour savoir
+      # si l'APK en ligne est plus récent que celui installé.
+      - name: Read version from build.gradle.kts
+        id: version
+        run: |
+          echo "code=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+          echo "name=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -51,4 +60,7 @@ jobs:
           name: Latest build
           prerelease: false
           make_latest: true
+          body: |
+            versionCode=${{ steps.version.outputs.code }}
+            versionName=${{ steps.version.outputs.name }}
           files: app/build/outputs/apk/debug/app-debug.apk

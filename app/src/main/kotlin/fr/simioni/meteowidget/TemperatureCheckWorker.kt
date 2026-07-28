@@ -46,9 +46,14 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
     override suspend fun doWork(): Result {
         if (!mutex.tryLock()) {
-            Log.d(TAG, "Cycle déjà en cours, ignoré")
-            LogStore.append(applicationContext, "[Worker] Cycle déjà en cours, ignoré")
-            return Result.success()
+            // Surtout pas Result.success() ici : "Forcer un cycle" et le changement
+            // de lieu remplacent la tâche en cours (ExistingWorkPolicy.REPLACE), donc
+            // le cycle qui tenait le verrou vient d'être annulé en plein milieu.
+            // L'abandonner laissait l'app sans température extérieure jusqu'au cycle
+            // périodique suivant, soit un quart d'heure plus tard.
+            Log.d(TAG, "Cycle déjà en cours, on retente")
+            LogStore.append(applicationContext, "[Worker] Cycle déjà en cours — nouvel essai dans un instant")
+            return Result.retry()
         }
         try {
         return doWorkLocked()
@@ -63,7 +68,9 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
         val location = Prefs.getLocation(applicationContext)
         val freshIndoor = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        val freshOutdoor = location.fetchOutdoorTemperature(applicationContext)
+        // Jsoup bloque le thread : à garder sur le dispatcher IO, pas sur celui par
+        // défaut du Worker qui n'a qu'une poignée de threads.
+        val freshOutdoor = withContext(Dispatchers.IO) { location.fetchOutdoorTemperature(applicationContext) }
 
         val prefs = Prefs.get(applicationContext)
 
