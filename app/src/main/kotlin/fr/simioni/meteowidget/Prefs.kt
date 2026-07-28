@@ -13,6 +13,7 @@ object Prefs {
     // v2 : la v1 était écrite automatiquement par l'ancienne sélection GPS (peu fiable,
     // ex. station 07260 sans relevé) — nouvelle clé pour repartir sur la station par défaut.
     const val KEY_STATION_CODE = "station_code_v2"
+    private const val KEY_ARANET_ADDRESS = "aranet_address"
     const val STATE_NONE = "NONE"
     const val STATE_OPEN = "OPEN"
     const val STATE_CLOSE = "CLOSE"
@@ -48,6 +49,21 @@ object Prefs {
 
     fun getLocation(context: Context): WeatherLocation =
         WeatherLocation.fromId(get(context).getString(KEY_LOCATION, null))
+
+    /**
+     * Adresse MAC de l'Aranet retenu, mémorisée au premier décodage réussi.
+     * Tant qu'elle est posée, les autres Aranet croisés (magasin, voisin) sont ignorés.
+     */
+    fun getAranetAddress(context: Context): String? =
+        get(context).getString(KEY_ARANET_ADDRESS, null)?.takeIf { it.isNotBlank() }
+
+    fun setAranetAddress(context: Context, address: String) {
+        get(context).edit().putString(KEY_ARANET_ADDRESS, address).apply()
+    }
+
+    fun forgetAranetAddress(context: Context) {
+        get(context).edit().remove(KEY_ARANET_ADDRESS).apply()
+    }
 
     /** Code de station Meteociel saisi par l'utilisateur, ou la station par défaut. */
     fun getStationCode(context: Context): String =
