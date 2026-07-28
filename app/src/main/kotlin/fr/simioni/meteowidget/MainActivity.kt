@@ -135,6 +135,19 @@ class MainActivity : AppCompatActivity() {
                 requestPermsOrSettings()
             }
         }
+        // Appui long : oublier l'Aranet mémorisé (changement de capteur, mauvaise
+        // adresse retenue). Le prochain scan réussi en mémorisera un nouveau.
+        findViewById<Button>(R.id.btnScan).setOnLongClickListener {
+            val known = Prefs.getAranetAddress(this)
+            if (known == null) {
+                Toast.makeText(this, "Aucun Aranet mémorisé", Toast.LENGTH_SHORT).show()
+            } else {
+                Prefs.forgetAranetAddress(this)
+                appendLog("Aranet $known oublié — le prochain trouvé sera mémorisé")
+                Toast.makeText(this, "Aranet oublié", Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
         findViewById<Button>(R.id.btnCopyLogs).setOnClickListener {
             val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cb.setPrimaryClip(ClipData.newPlainText("logs", logBuffer.toString()))

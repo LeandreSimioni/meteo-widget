@@ -64,14 +64,23 @@ class BleScanService : Service() {
             val address = result.device.address
             if (!seenAddresses.add(address)) return
 
-            // Le filtre garantit que seul l'Aranet4 (MfID 0x0702) arrive ici
-            val name = try { result.device.name } catch (_: SecurityException) { null }
-                ?: result.scanRecord?.deviceName ?: "Aranet4"
-            log("[${result.rssi} dBm] $name trouvé")
-
+            // Le filtre matériel n'est pas fiable partout : dans un lieu très
+            // fréquenté on a vu 126 appareils remonter ici alors qu'il ne devait
+            // laisser passer que le Manufacturer ID Aranet. On revérifie donc,
+            // et surtout on ne log rien avant d'avoir la confirmation — sinon
+            // chaque appareil inconnu du magasin apparaît comme un Aranet.
             val data = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID) ?: return
 
-            log("→ ARANET détecté! ${data.size} bytes: ${AranetDecoder.toHex(data)}")
+            val pinned = Prefs.getAranetAddress(this@BleScanService)
+            if (pinned != null && pinned != address) {
+                log("Autre Aranet ignoré ($address) — le tien est $pinned")
+                return
+            }
+
+            val name = try { result.device.name } catch (_: SecurityException) { null }
+                ?: result.scanRecord?.deviceName ?: "(sans nom)"
+            log("[${result.rssi} dBm] Aranet $name / $address")
+            log("→ ${data.size} bytes: ${AranetDecoder.toHex(data)}")
 
             val reading = AranetDecoder.decode(data) ?: run {
                 log("→ Trame trop courte (${data.size} < 21) — Smart Home activé dans Aranet?")
@@ -80,6 +89,13 @@ class BleScanService : Service() {
 
             log("→ Temp=%.1f°C CO2=%dppm Hum=%d%% Bat=%d%% Age=%ds".format(
                 reading.temperatureC, reading.co2Ppm, reading.humidity, reading.battery, reading.ageSec))
+
+            // Premier Aranet effectivement décodé : on retient son adresse pour
+            // ne plus jamais lire celui d'un voisin ou d'un magasin.
+            if (Prefs.getAranetAddress(this@BleScanService) == null) {
+                Prefs.setAranetAddress(this@BleScanService, address)
+                log("Aranet mémorisé → $address (appui long sur « Scan debug » pour oublier)")
+            }
 
             sendResult(reading.temperatureC, reading.ageSec)
             stopSelf()
@@ -129,12 +145,13 @@ class BleScanService : Service() {
             .build()
         try {
             scanner.startScan(listOf(filter), settings, scanCallback)
-            log("Scan démarré (${SCAN_DURATION_MS / 1000}s)...")
+            val pinned = Prefs.getAranetAddress(this)
+            log("Scan démarré (${SCAN_DURATION_MS / 1000}s)" +
+                if (pinned != null) " — Aranet $pinned" else " — aucun Aranet mémorisé")
             val timeout = Runnable {
                 try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
-                log("Fin scan — ${seenAddresses.size} appareils vus")
                 if (!resultSent) {
-                    log("Aranet4 (MfID 0x0702) NON trouvé")
+                    log("Fin scan — ${seenAddresses.size} appareils vus, aucun Aranet (MfID 0x0702)")
                     sendResult()
                 }
                 stopSelf()
