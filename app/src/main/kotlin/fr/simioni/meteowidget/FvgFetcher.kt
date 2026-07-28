@@ -17,8 +17,8 @@ import java.util.TimeZone
  * pointe vers une tout autre station.
  *
  * Les relevés sont horaires et publiés ~30 min après l'heure ronde ; certaines
- * stations décrochent plusieurs heures. On rejette donc les données trop vieilles
- * plutôt que de piloter les fenêtres sur un relevé périmé.
+ * stations décrochent plusieurs heures. La date du relevé est donc portée par
+ * la [Reading] et c'est l'appelant qui décide si elle est encore exploitable.
  *
  * Données © ARPA FVG - OSMER e GRN (CC BY-SA 3.0 IT), http://www.meteo.fvg.it/
  */
@@ -26,8 +26,11 @@ object FvgFetcher {
     private const val TAG = "FvgFetcher"
     private const val BASE_URL = "https://dev.meteo.fvg.it/xml/stazioni"
 
-    /** Au-delà, le relevé horaire est considéré comme périmé. */
-    private const val MAX_AGE_MS = 3 * 60 * 60 * 1000L
+    data class Observation(
+        val stationName: String,
+        val temperatureC: Float,
+        val observedAtMs: Long,
+    )
 
     private fun log(ctx: Context, msg: String) {
         Log.d(TAG, msg)
@@ -38,43 +41,31 @@ object FvgFetcher {
         })
     }
 
-    fun fetchOutdoorTemperature(ctx: Context, station: String): Float? {
+    suspend fun fetchOutdoorTemperature(ctx: Context, station: String): Reading? {
         return try {
             val url = "$BASE_URL/$station.xml"
             log(ctx, "Requête → $url")
 
-            val doc = Jsoup.connect(url)
-                .parser(Parser.xmlParser())
-                .userAgent("Mozilla/5.0 (Linux; Android) MeteoWidget/1.0")
-                .header("Accept", "application/xml,text/xml;q=0.9,*/*;q=0.8")
-                .timeout(15_000)
-                .get()
+            val xml = withNetworkRetry(
+                onRetry = { attempt, e -> log(ctx, "Réseau KO (essai $attempt): ${e.message} — on retente") }
+            ) {
+                Jsoup.connect(url)
+                    .parser(Parser.xmlParser())
+                    .userAgent("Mozilla/5.0 (Linux; Android) MeteoWidget/1.1")
+                    .header("Accept", "application/xml,text/xml;q=0.9,*/*;q=0.8")
+                    .timeout(15_000)
+                    .get()
+                    .outerHtml()
+            }
 
-            val obs = doc.selectFirst("data > meteo_data") ?: run {
-                log(ctx, "ERREUR: bloc meteo_data absent")
+            val obs = parseObservation(xml) ?: run {
+                log(ctx, "ERREUR: relevé illisible dans la réponse")
                 return null
             }
 
-            val temp = obs.selectFirst("t180")?.text()
-                ?.replace(",", ".")?.trim()
-                ?.toFloatOrNull()
-                ?.takeIf { it in -50f..60f }
-                ?: run {
-                    log(ctx, "ERREUR: température t180 absente ou hors plage")
-                    return null
-                }
-
-            val name = obs.selectFirst("station_name")?.text() ?: station
-            val obsTime = obs.selectFirst("observation_time")?.text()
-            val ageMs = obsTime?.let { ageOf(it) }
-
-            if (ageMs != null && ageMs > MAX_AGE_MS) {
-                log(ctx, "Relevé périmé ($obsTime, ${ageMs / 60_000} min) — ignoré")
-                return null
-            }
-
-            log(ctx, "$name ($station) $obsTime → $temp°C")
-            temp
+            val reading = Reading(obs.temperatureC, obs.observedAtMs)
+            log(ctx, "${obs.stationName} ($station) → ${obs.temperatureC}°C, ${Reading.formatAge(reading.ageMs())}")
+            reading
         } catch (e: Exception) {
             log(ctx, "ERREUR: ${e.message}")
             Log.e(TAG, "Échec récupération température FVG", e)
@@ -82,14 +73,30 @@ object FvgFetcher {
         }
     }
 
-    /** "28/07/2026 17.00 UTC" → âge en millisecondes, ou null si illisible. */
-    private fun ageOf(observationTime: String): Long? = try {
+    /** Parsing pur, sans Android ni réseau — testable. */
+    fun parseObservation(xml: String): Observation? {
+        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
+        val obs = doc.selectFirst("data > meteo_data") ?: return null
+
+        val temp = obs.selectFirst("t180")?.text()
+            ?.replace(",", ".")?.trim()
+            ?.toFloatOrNull()
+            ?.takeIf { it in -50f..60f }
+            ?: return null
+
+        val observedAt = obs.selectFirst("observation_time")?.text()?.let(::parseUtc) ?: return null
+        val name = obs.selectFirst("station_name")?.text()?.takeIf { it.isNotBlank() } ?: "?"
+
+        return Observation(name, temp, observedAt)
+    }
+
+    /** "28/07/2026 17.00 UTC" → epoch millis, ou null si illisible. */
+    fun parseUtc(observationTime: String): Long? = try {
         val fmt = SimpleDateFormat("dd/MM/yyyy HH.mm", Locale.ROOT).apply {
             timeZone = TimeZone.getTimeZone("UTC")
             isLenient = false
         }
-        val parsed = fmt.parse(observationTime.removeSuffix("UTC").trim())
-        parsed?.let { System.currentTimeMillis() - it.time }
+        fmt.parse(observationTime.removeSuffix("UTC").trim())?.time
     } catch (_: Exception) {
         null
     }

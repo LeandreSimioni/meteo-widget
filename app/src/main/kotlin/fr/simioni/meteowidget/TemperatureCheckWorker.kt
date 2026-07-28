@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit
 class TemperatureCheckWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     companion object {
         const val TAG = "TempCheckWorker"
-        const val THRESHOLD = 0.5f
         const val BLE_TIMEOUT_SEC = 20L
         private val mutex = Mutex()
     }
@@ -64,42 +63,42 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
         val location = Prefs.getLocation(applicationContext)
         val freshIndoor = withContext(Dispatchers.IO) { scanBleForIndoorTemp() }
-        val freshOutdoor = withContext(Dispatchers.IO) { location.fetchOutdoorTemperature(applicationContext) }
+        val freshOutdoor = location.fetchOutdoorTemperature(applicationContext)
 
         val prefs = Prefs.get(applicationContext)
 
-        // Persist fresh readings (ne pas écraser si null)
-        prefs.edit().apply {
-            if (freshIndoor != null) putFloat(Prefs.KEY_INDOOR, freshIndoor)
-            if (freshOutdoor != null) putFloat(Prefs.KEY_OUTDOOR, freshOutdoor)
-        }.apply()
+        // Persister les relevés frais (ne pas écraser si null)
+        if (freshIndoor != null) Prefs.putIndoor(applicationContext, freshIndoor)
+        if (freshOutdoor != null) Prefs.putOutdoor(applicationContext, freshOutdoor)
 
-        // Utiliser la dernière valeur connue si la lecture fraîche a échoué
-        val indoor = freshIndoor ?: prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN).takeIf { !it.isNaN() }
-        val outdoor = freshOutdoor ?: prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN).takeIf { !it.isNaN() }
+        // Se rabattre sur la dernière valeur connue — mais seulement si elle est
+        // encore d'actualité. Une température d'il y a trois heures ne dit plus
+        // rien de l'état des fenêtres maintenant.
+        val indoor = usable(freshIndoor ?: Prefs.getIndoor(applicationContext), Reading.MAX_AGE_INDOOR_MS)
+        val outdoor = usable(freshOutdoor ?: Prefs.getOutdoor(applicationContext), Reading.MAX_AGE_OUTDOOR_MS)
 
-        if (freshIndoor == null) log("Aranet hors portée${if (indoor != null) " — dernière valeur: %.1f°C".format(indoor) else ""}")
-        if (freshOutdoor == null) log("${location.label} indisponible${if (outdoor != null) " — dernière valeur: %.1f°C".format(outdoor) else ""}")
+        if (freshIndoor == null) log("Aranet hors portée${describeFallback(indoor)}")
+        if (freshOutdoor == null) log("${location.label} indisponible${describeFallback(outdoor)}")
 
         if (indoor == null && outdoor == null) {
-            log("Aucune donnée disponible")
+            log("Aucune donnée exploitable")
+            NotificationHelper.updateStatusNotification(applicationContext, null, null, null, false, location)
+            TemperatureWidgetProvider.updateAll(applicationContext)
             return Result.success()
         }
 
         var stateChanged = false
         val openWindows: Boolean? = if (indoor != null && outdoor != null) {
-            val diff = indoor - outdoor
-            val prevState = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
-            val state = when {
-                diff > THRESHOLD  -> Prefs.STATE_OPEN
-                diff < -THRESHOLD -> Prefs.STATE_CLOSE
-                else              -> Prefs.STATE_NONE
+            val previous = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE) ?: Prefs.STATE_NONE
+            val advice = WindowAdvisor.advise(indoor.value, outdoor.value, previous)
+            log("%.1f°C dedans · %.1f°C dehors → %s".format(indoor.value, outdoor.value, advice.state))
+            stateChanged = advice.alert
+            prefs.edit().putString(Prefs.KEY_LAST_STATE, advice.state).apply()
+            when (advice.state) {
+                Prefs.STATE_OPEN -> true
+                Prefs.STATE_CLOSE -> false
+                else -> null
             }
-            log("%.1f°C dedans · %.1f°C dehors → %s".format(indoor, outdoor, state))
-            // Alerter uniquement sur transition vers un état actionnable (OPEN ou CLOSE)
-            stateChanged = state != Prefs.STATE_NONE && state != prevState
-            prefs.edit().putString(Prefs.KEY_LAST_STATE, state).apply()
-            when (state) { Prefs.STATE_OPEN -> true; Prefs.STATE_CLOSE -> false; else -> null }
         } else null
 
         NotificationHelper.updateStatusNotification(applicationContext, indoor, outdoor, openWindows, stateChanged, location)
@@ -107,14 +106,31 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
         return Result.success()
     }
 
-    private fun scanBleForIndoorTemp(): Float? {
+    /** Écarte une mesure trop vieille pour fonder un conseil. */
+    private fun usable(reading: Reading?, maxAgeMs: Long): Reading? {
+        if (reading == null) return null
+        if (reading.isFresh(maxAgeMs)) return reading
+        log("Valeur périmée ignorée (%.1f°C, %s)".format(reading.value, Reading.formatAge(reading.ageMs())))
+        return null
+    }
+
+    private fun describeFallback(reading: Reading?): String =
+        if (reading != null) " — dernière valeur: %.1f°C (%s)".format(reading.value, Reading.formatAge(reading.ageMs()))
+        else ""
+
+    private fun scanBleForIndoorTemp(): Reading? {
         val latch = CountDownLatch(1)
-        var temperature: Float? = null
+        var reading: Reading? = null
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val t = intent.getFloatExtra(BleScanService.EXTRA_TEMPERATURE, Float.NaN)
-                if (!t.isNaN()) temperature = t
+                if (!t.isNaN()) {
+                    // L'Aranet indique l'ancienneté de sa mesure : la trame captée
+                    // maintenant peut dater de plusieurs minutes.
+                    val ageSec = intent.getIntExtra(BleScanService.EXTRA_AGE_SEC, 0).coerceIn(0, 3600)
+                    reading = Reading(t, System.currentTimeMillis() - ageSec * 1000L)
+                }
                 latch.countDown()
             }
         }
@@ -137,6 +153,6 @@ class TemperatureCheckWorker(context: Context, params: WorkerParameters) : Corou
 
         latch.await(BLE_TIMEOUT_SEC, TimeUnit.SECONDS)
         try { applicationContext.unregisterReceiver(receiver) } catch (_: Exception) {}
-        return temperature
+        return reading
     }
 }

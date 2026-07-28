@@ -38,8 +38,8 @@ object NotificationHelper {
 
     fun updateStatusNotification(
         context: Context,
-        indoor: Float?,
-        outdoor: Float?,
+        indoor: Reading?,
+        outdoor: Reading?,
         openWindows: Boolean?,
         stateChanged: Boolean = false,
         location: WeatherLocation = WeatherLocation.DEFAULT
@@ -51,9 +51,13 @@ object NotificationHelper {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val indoorStr = if (indoor != null) "%.1f°C dedans".format(indoor) else "-- dedans"
-        val outdoorStr = if (outdoor != null) "%.1f°C dehors (${location.label})".format(outdoor)
+        val indoorStr = if (indoor != null) "%.1f°C dedans".format(indoor.value) else "-- dedans"
+        val outdoorStr = if (outdoor != null) "%.1f°C dehors (${location.label})".format(outdoor.value)
                          else "-- dehors (${location.label})"
+        // L'âge de la mesure la plus ancienne : c'est elle qui limite la confiance
+        // qu'on peut accorder au conseil affiché.
+        val oldest = listOfNotNull(indoor, outdoor).maxByOrNull { it.ageMs() }
+        val ageStr = oldest?.let { " · ${Reading.formatAge(it.ageMs())}" } ?: ""
         val (title, icon) = when (openWindows) {
             true  -> Pair("↑ Ouvrir les fenêtres", android.R.drawable.arrow_up_float)
             false -> Pair("↓ Fermer les fenêtres", android.R.drawable.arrow_down_float)
@@ -62,7 +66,7 @@ object NotificationHelper {
         nm.notify(NOTIF_STATUS_ID,
             NotificationCompat.Builder(context, CHANNEL_STATUS)
                 .setContentTitle(title)
-                .setContentText("$outdoorStr · $indoorStr")
+                .setContentText("$outdoorStr · $indoorStr$ageStr")
                 .setSmallIcon(icon)
                 .setContentIntent(pi)
                 .setOngoing(true)

@@ -23,7 +23,7 @@ enum class WeatherLocation(
         sourceLabel = "ARPA FVG · Mure (Sesto al Reghena), 6 km",
     );
 
-    fun fetchOutdoorTemperature(ctx: Context): Float? = when (this) {
+    suspend fun fetchOutdoorTemperature(ctx: Context): Reading? = when (this) {
         AVIGNON   -> MeteocielFetcher.fetchOutdoorTemperature(ctx, METEOCIEL_AVIGNON)
         CORDOVADO -> FvgFetcher.fetchOutdoorTemperature(ctx, FVG_MURE)
     }

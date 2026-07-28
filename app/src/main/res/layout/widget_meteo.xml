@@ -49,6 +49,15 @@
         android:textColor="#AAAAAA" />
 
     <TextView
+        android:id="@+id/widgetAge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text=""
+        android:textSize="10sp"
+        android:textColor="#777777" />
+
+    <TextView
         android:id="@+id/widgetStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

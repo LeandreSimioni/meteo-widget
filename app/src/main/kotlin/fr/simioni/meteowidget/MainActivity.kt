@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
         locationButton = findViewById(R.id.btnLocation)
         locationButton.setOnClickListener { showLocationPicker() }
         refreshLocationButton()
+        title = "Meteo Widget ${appVersion()}"
 
         val filter = IntentFilter().apply {
             addAction(BleScanService.ACTION_LOG)
@@ -159,22 +160,44 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTemps() {
         val prefs = Prefs.get(this)
-        val indoor = prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN)
-        val outdoor = prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN)
+        val indoor = Prefs.getIndoor(this)
+        val outdoor = Prefs.getOutdoor(this)
         val state = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE)
-        val indoorStr = if (indoor.isNaN()) "--" else "%.1f°C".format(indoor)
-        val outdoorStr = if (outdoor.isNaN()) "--" else "%.1f°C".format(outdoor)
+        val indoorStr = describe(indoor, Reading.MAX_AGE_INDOOR_MS)
+        val outdoorStr = describe(outdoor, Reading.MAX_AGE_OUTDOOR_MS)
         val advice = when (state) {
             Prefs.STATE_OPEN  -> " · ↑ Ouvrir"
             Prefs.STATE_CLOSE -> " · ↓ Fermer"
             else -> ""
         }
-        setStatus("$indoorStr dedans · $outdoorStr ${Prefs.getLocation(this).label}$advice", "#1565C0")
+        val stale = listOfNotNull(
+            indoor?.isFresh(Reading.MAX_AGE_INDOOR_MS),
+            outdoor?.isFresh(Reading.MAX_AGE_OUTDOOR_MS),
+        ).any { !it }
+        setStatus(
+            "$indoorStr dedans · $outdoorStr ${Prefs.getLocation(this).label}$advice",
+            if (stale) "#616161" else "#1565C0",
+        )
+    }
+
+    /** "21.4°C" si la mesure est d'actualité, "21.4°C (il y a 4 h 10)" sinon. */
+    private fun describe(reading: Reading?, maxAgeMs: Long): String = when {
+        reading == null -> "--"
+        reading.isFresh(maxAgeMs) -> "%.1f°C".format(reading.value)
+        else -> "%.1f°C (%s)".format(reading.value, Reading.formatAge(reading.ageMs()))
     }
 
     private fun refreshLocationButton() {
         val loc = Prefs.getLocation(this)
         locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel})"
+    }
+
+    /** Sans ça, impossible de savoir quelle build tourne sur le téléphone. */
+    private fun appVersion(): String = try {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        "v${info.versionName}"
+    } catch (_: Exception) {
+        ""
     }
 
     private fun showLocationPicker() {

@@ -21,12 +21,18 @@ class BleScanService : Service() {
         const val ACTION_RESULT = "fr.simioni.meteowidget.BLE_RESULT"
         const val ACTION_LOG = "fr.simioni.meteowidget.BLE_LOG"
         const val EXTRA_TEMPERATURE = "temperature"
+        const val EXTRA_AGE_SEC = "age_sec"
         const val EXTRA_LOG_MSG = "log_msg"
     }
 
     private val seenAddresses = mutableSetOf<String>()
     private var resultSent = false
     private var scanStarted = false
+
+    // Gardé pour pouvoir annuler la fin de scan différée : sans ça, l'Aranet trouvé
+    // en 2 s laissait un runnable s'exécuter 13 s plus tard sur un service détruit.
+    private val handler = Handler(Looper.getMainLooper())
+    private var scanTimeout: Runnable? = null
 
     private val adapter by lazy {
         (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
@@ -41,12 +47,15 @@ class BleScanService : Service() {
         })
     }
 
-    private fun sendResult(temp: Float? = null) {
+    private fun sendResult(temp: Float? = null, ageSec: Int = 0) {
         if (resultSent) return
         resultSent = true
         sendBroadcast(Intent(ACTION_RESULT).apply {
             setPackage(packageName)
-            if (temp != null) putExtra(EXTRA_TEMPERATURE, temp)
+            if (temp != null) {
+                putExtra(EXTRA_TEMPERATURE, temp)
+                putExtra(EXTRA_AGE_SEC, ageSec)
+            }
         })
     }
 
@@ -72,7 +81,7 @@ class BleScanService : Service() {
             log("→ Temp=%.1f°C CO2=%dppm Hum=%d%% Bat=%d%% Age=%ds".format(
                 reading.temperatureC, reading.co2Ppm, reading.humidity, reading.battery, reading.ageSec))
 
-            sendResult(reading.temperatureC)
+            sendResult(reading.temperatureC, reading.ageSec)
             stopSelf()
         }
 
@@ -121,7 +130,7 @@ class BleScanService : Service() {
         try {
             scanner.startScan(listOf(filter), settings, scanCallback)
             log("Scan démarré (${SCAN_DURATION_MS / 1000}s)...")
-            Handler(Looper.getMainLooper()).postDelayed({
+            val timeout = Runnable {
                 try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
                 log("Fin scan — ${seenAddresses.size} appareils vus")
                 if (!resultSent) {
@@ -129,7 +138,9 @@ class BleScanService : Service() {
                     sendResult()
                 }
                 stopSelf()
-            }, SCAN_DURATION_MS)
+            }
+            scanTimeout = timeout
+            handler.postDelayed(timeout, SCAN_DURATION_MS)
         } catch (e: Exception) {
             log("Exception scan: ${e.message}")
             sendResult()
@@ -141,6 +152,8 @@ class BleScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        scanTimeout?.let { handler.removeCallbacks(it) }
+        scanTimeout = null
         try { adapter.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
     }
 }
