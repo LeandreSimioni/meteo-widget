@@ -20,7 +20,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -36,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var locationButton: Button
     private lateinit var stationCodeInput: EditText
     private lateinit var stationCodeRow: android.view.View
+    private lateinit var updateButton: Button
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -110,7 +115,8 @@ class MainActivity : AppCompatActivity() {
         locationButton = findViewById(R.id.btnLocation)
         locationButton.setOnClickListener { showLocationPicker() }
         refreshLocationButton()
-        title = "Meteo Widget ${appVersion()}"
+        updateButton = findViewById(R.id.btnUpdate)
+        updateButton.setOnClickListener { checkForUpdate() }
 
         val filter = IntentFilter().apply {
             addAction(BleScanService.ACTION_LOG)
@@ -244,6 +250,79 @@ class MainActivity : AppCompatActivity() {
         else -> "%.1f°C (%s)".format(reading.value, Reading.formatAge(reading.ageMs()))
     }
 
+    /**
+     * Cherche la dernière release publiée, et si elle est plus récente que la
+     * version installée, télécharge l'APK et le passe à l'installeur système.
+     */
+    private fun checkForUpdate() {
+        updateButton.isEnabled = false
+        updateButton.text = "Recherche…"
+        lifecycleScope.launch {
+            val release = withContext(Dispatchers.IO) {
+                runCatching { UpdateChecker.fetchLatest(BuildConfig.UPDATE_REPO) }.getOrNull()
+            }
+            val installed = UpdateChecker.installedVersionCode(this@MainActivity)
+            updateButton.isEnabled = true
+            when {
+                release == null -> {
+                    updateButton.text = "Rechercher une mise à jour"
+                    appendLog("Mise à jour : release introuvable ou réseau indisponible")
+                    Toast.makeText(this@MainActivity, "Impossible de vérifier", Toast.LENGTH_SHORT).show()
+                }
+                release.versionCode <= installed -> {
+                    updateButton.text = "À jour (v${release.versionName})"
+                    appendLog("Mise à jour : déjà à jour (v${release.versionName})")
+                }
+                else -> {
+                    updateButton.text = "Installer la v${release.versionName}"
+                    appendLog("Mise à jour disponible : v${release.versionName}")
+                    confirmAndInstall(release)
+                }
+            }
+        }
+    }
+
+    private fun confirmAndInstall(release: UpdateChecker.Release) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Mise à jour disponible")
+            .setMessage("Version ${release.versionName} — télécharger et installer ?")
+            .setPositiveButton("Installer") { _, _ -> downloadAndInstall(release) }
+            .setNegativeButton("Plus tard", null)
+            .show()
+    }
+
+    private fun downloadAndInstall(release: UpdateChecker.Release) {
+        // Sans cette autorisation, l'installeur se ferme aussitôt sans rien dire.
+        if (!UpdateChecker.canInstall(this)) {
+            appendLog("Mise à jour : autorisation « installer des applications inconnues » requise")
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+            )
+            return
+        }
+        updateButton.isEnabled = false
+        lifecycleScope.launch {
+            val apk = withContext(Dispatchers.IO) {
+                runCatching {
+                    UpdateChecker.download(this@MainActivity, release.apkUrl) { percent ->
+                        runOnUiThread { updateButton.text = if (percent < 0) "Téléchargement…" else "Téléchargement $percent %" }
+                    }
+                }.getOrNull()
+            }
+            updateButton.isEnabled = true
+            if (apk == null) {
+                updateButton.text = "Installer la v${release.versionName}"
+                appendLog("Mise à jour : échec du téléchargement")
+                Toast.makeText(this@MainActivity, "Téléchargement échoué", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            updateButton.text = "Installer la v${release.versionName}"
+            appendLog("Mise à jour : APK téléchargé (${apk.length() / 1024} Ko) — installation")
+            runCatching { UpdateChecker.install(this@MainActivity, apk) }
+                .onFailure { appendLog("Mise à jour : installeur indisponible (${it.message})") }
+        }
+    }
+
     private fun refreshLocationButton() {
         val loc = Prefs.getLocation(this)
         locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel(this)})"
@@ -256,13 +335,6 @@ class MainActivity : AppCompatActivity() {
             else android.view.View.GONE
     }
 
-    /** Sans ça, impossible de savoir quelle build tourne sur le téléphone. */
-    private fun appVersion(): String = try {
-        val info = packageManager.getPackageInfo(packageName, 0)
-        "v${info.versionName}"
-    } catch (_: Exception) {
-        ""
-    }
 
     private fun showLocationPicker() {
         val options = WeatherLocation.entries

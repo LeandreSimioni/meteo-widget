@@ -65,6 +65,14 @@
 
     </LinearLayout>
 
+    <!-- Mise à jour depuis la release GitHub "latest" -->
+    <Button
+        android:id="@+id/btnUpdate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Rechercher une mise à jour"
+        android:textSize="13sp" />
+
     <!-- Zone de log, prend tout l'espace disponible -->
     <ScrollView
         android:id="@+id/logScroll"
