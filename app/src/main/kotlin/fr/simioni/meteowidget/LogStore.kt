@@ -10,6 +10,10 @@ import java.util.Locale
 object LogStore {
     private const val FILE_NAME = "app_logs.txt"
     private const val MAX_AGE_MS = 2 * 60 * 60 * 1000L
+
+    /** En dessous, ça ne vaut pas le coup de relire et réécrire tout le fichier. */
+    private const val PRUNE_ABOVE_BYTES = 64 * 1024L
+
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     @Synchronized
@@ -19,13 +23,15 @@ object LogStore {
         try {
             val file = File(context.applicationContext.filesDir, FILE_NAME)
             file.appendText("$now\t$formatted\n")
-            pruneIfNeeded(file, now)
+            // Le nettoyage relit et réécrit tout le fichier : le faire à chaque
+            // ligne coûtait un cycle de lecture/écriture par ligne de log.
+            if (file.length() > PRUNE_ABOVE_BYTES) prune(file, now)
         } catch (e: Exception) {
             Log.e("LogStore", "Écriture échouée: ${e.message}")
         }
     }
 
-    private fun pruneIfNeeded(file: File, now: Long) {
+    private fun prune(file: File, now: Long) {
         val cutoff = now - MAX_AGE_MS
         val lines = file.readLines()
         val kept = lines.filter {

@@ -22,34 +22,56 @@ c'est prêt.
 ## Architecture
 
 - `TemperatureCheckWorker` — cycle périodique (WorkManager, 15 min) : scanne le
-  BLE pour l'Aranet4, résout la station Météo-France la plus proche, récupère
-  la température extérieure, met à jour `Prefs`, la notification et le widget.
+  BLE pour l'Aranet4, récupère la température extérieure du lieu sélectionné,
+  met à jour `Prefs`, la notification et le widget.
 - `BleScanService` + `AranetDecoder` — scan BLE foreground, filtre sur le
-  Manufacturer ID Aranet (`0x0702`), décode la trame manufacturer data.
+  Manufacturer ID Aranet (`0x0702`), décode la trame manufacturer data. La
+  trame porte son propre âge (`ageSec`), utilisé pour dater la mesure.
+- `WeatherLocation` — les lieux disponibles et leur source. `FRANCE` interroge
+  Meteociel avec le code de station enregistré ; `CORDOVADO` interroge l'ARPA
+  FVG. Le choix est dans `Prefs.KEY_LOCATION`.
 - `MeteocielFetcher` — scrape `meteociel.fr/temps-reel/obs_villes.php` pour un
-  `code2` (code de station) donné ; retourne le dernier relevé réel.
-- `StationLocator` — référentiel d'environ 150 stations officielles
-  Météo-France (réseau synop + auxiliaire, métropole + Corse, codes à 5
-  chiffres) avec coordonnées ; `nearest(lat, lon)` calcule la plus proche par
-  haversine. Le code stocké inclut le zéro initial (ex. `"07156"`) ;
-  `MeteocielFetcher` le strip pour construire l'URL (`code2=7156`).
+  `code2` donné. `parseLatest()` est pur et testé.
+- `FvgFetcher` — XML officiel de l'ARPA FVG, un fichier par station :
+  `dev.meteo.fvg.it/xml/stazioni/{SIGLA}.xml`. `parseObservation()` est pur et
+  testé. Relevés horaires, publiés ~30 min après l'heure ronde, horodatés UTC.
+- `Reading` — une température **et** la date à laquelle elle a été mesurée.
+  Une mesure trop vieille (90 min dedans, 3 h dehors) n'alimente plus le
+  conseil ; elle reste affichée mais grisée.
+- `WindowAdvisor` — logique pure ouvrir/fermer, avec hystérésis (entrée à
+  0,5 °C, sortie à 0,2 °C) pour éviter de resonner sur un écart qui oscille.
 - `TemperatureWidgetProvider` — construit les `RemoteViews` du widget : temp.
-  intérieure/extérieure, conseil ouvrir/fermer, et un petit indicateur 📱 de la
-  température de la batterie du téléphone (pas un vrai capteur de température
-  ambiante — Android n'en expose pas de fiable sur la plupart des téléphones).
+  intérieure/extérieure, conseil ouvrir/fermer, âge de la mesure, et un petit
+  indicateur 📱 de la température de la batterie du téléphone (pas un vrai
+  capteur ambiant — Android n'en expose pas de fiable).
 - `Prefs` — `SharedPreferences` partagées entre Worker et widget (dernières
-  valeurs connues, dernier état, dernière station retenue).
+  valeurs connues et leur date, dernier état, lieu, code de station).
 - `WorkScheduler` / `BootReceiver` — (re)programment le cycle périodique, y
   compris après redémarrage du téléphone.
 
-## Géolocalisation de la station extérieure
+## Choix du lieu extérieur
 
-`TemperatureCheckWorker.resolveStationCode()` utilise la dernière position
-connue (`LocationManager`, permission `ACCESS_COARSE_LOCATION`) pour choisir la
-station la plus proche via `StationLocator`. Si la position est indisponible,
-réutilise la dernière station retenue (`Prefs.KEY_STATION_CODE`), sinon retombe
-sur l'ancien code fixe historique (`MeteocielFetcher.FALLBACK_STATION_CODE =
-"58304005"`).
+Le bouton "Lieu" de `MainActivity` bascule entre `FRANCE` et `CORDOVADO`.
+
+- **France** — station Meteociel, code modifiable dans le champ "Station"
+  (`Prefs.KEY_STATION_CODE`, défaut `MeteocielFetcher.DEFAULT_STATION_CODE` =
+  `7563`, Avignon). Le code stocké peut inclure un zéro initial (`"07156"`) ;
+  `MeteocielFetcher` le strip pour l'URL (`code2=7156`).
+- **Cordovado** — station ARPA FVG `D101` (Mure, commune de Sesto al Reghena),
+  la plus proche à 6,2 km. Le champ "Station" est masqué : rien à régler.
+  Attention, la sigle est obligatoire — `101.xml` est une autre station.
+  Données © ARPA FVG - OSMER e GRN, CC BY-SA 3.0 IT.
+
+Changer de lieu ou de code de station efface la température extérieure et
+l'état ouvrir/fermer stockés : ils ne veulent plus rien dire pour la nouvelle
+station.
+
+## Tests
+
+`gradle testDebugUnitTest` — tests JVM sur la logique pure (advisor, les deux
+parseurs, décodeur Aranet, fraîcheur des mesures). `MeteocielFetcherTest`
+tourne sur une vraie page enregistrée dans `app/src/test/resources/`. La CI les
+lance avant de construire l'APK.
 
 ## Contraintes d'environnement de dev
 
@@ -64,12 +86,10 @@ foi sur la compilation réelle.
 ## État actuel (30 juin 2026)
 
 - Indicateur 📱 température batterie : ajouté, fusionné sur `main`.
-- Station Météo-France géolocalisée : ajoutée, fusionnée sur `main` (remplace
-  le code de station fixe `58304005` par une sélection automatique).
-- Les deux fonctionnalités sont en production dans la release "latest".
-  Reste à confirmer par l'utilisateur en conditions réelles : permission de
-  localisation accordée, logs `[Worker] Position connue → station officielle
-  Météo-France ...` visibles dans l'app après réinstallation.
+- Station Météo-France géolocalisée : ajoutée puis **retirée** (commit
+  `9f6e06a`) — la sélection GPS tombait sur des stations sans relevé
+  exploitable (ex. 07260). `StationLocator` n'existe plus ; le code de station
+  est saisi à la main.
 
 ## Mise à jour (4 juillet 2026)
 
@@ -79,3 +99,22 @@ foi sur la compilation réelle.
   via le champ "Code de station" de `MainActivity` — un utilisateur qui a déjà
   sauvegardé une valeur dans `Prefs.KEY_STATION_CODE` doit la changer
   manuellement dans l'app (ou via `btnSaveStation`).
+
+## Mise à jour (28 juillet 2026)
+
+- **Cordovado** ajouté comme second lieu, via l'ARPA FVG. Séjours en Frioul :
+  station Mure (`D101`), commune de Sesto al Reghena.
+- **Scraper Meteociel** : la colonne de température est maintenant repérée par
+  l'en-tête du tableau (avec repli par motif). Le correctif précédent
+  (`b556a10`, détection par suffixe `°C`) est conservé comme repli — il
+  échouait si le `°` était mal décodé, la page étant en ISO-8859-1.
+- **Fraîcheur des mesures** : chaque relevé est daté de sa mesure, pas de sa
+  récupération. Une valeur périmée n'alimente plus le conseil ouvrir/fermer.
+  Avant, la dernière température intérieure connue était crue indéfiniment.
+- **Hystérésis** sur le conseil, pour arrêter de resonner à chaque cycle quand
+  l'écart oscille autour du seuil.
+- **Premiers tests du repo** (32 tests JVM), lancés par la CI avant l'APK.
+- Contrairement à ce qu'indique la section ci-dessus sur l'environnement de
+  dev : dans cette session, `dl.google.com` et `meteociel.fr` étaient
+  accessibles et un `gradle assembleDebug` local a fonctionné (SDK Android
+  installé à la main). Vérifier au cas par cas plutôt que de le supposer.

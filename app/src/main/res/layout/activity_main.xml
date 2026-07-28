@@ -17,8 +17,17 @@
         android:gravity="center"
         android:padding="12dp" />
 
-    <!-- Code de la station Meteociel utilisée pour la température extérieure -->
+    <!-- Lieu de la mesure extérieure -->
+    <Button
+        android:id="@+id/btnLocation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Lieu : —"
+        android:textSize="13sp" />
+
+    <!-- Code de la station Meteociel — masqué quand le lieu n'est pas en France -->
     <LinearLayout
+        android:id="@+id/stationCodeRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"

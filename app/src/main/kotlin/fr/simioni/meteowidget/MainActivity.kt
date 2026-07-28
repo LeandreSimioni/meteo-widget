@@ -32,6 +32,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
+    private lateinit var locationButton: Button
+    private lateinit var stationCodeInput: EditText
+    private lateinit var stationCodeRow: android.view.View
     private val logBuffer = StringBuilder()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -98,6 +101,10 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
         logScroll = findViewById(R.id.logScroll)
+        locationButton = findViewById(R.id.btnLocation)
+        locationButton.setOnClickListener { showLocationPicker() }
+        refreshLocationButton()
+        title = "Meteo Widget ${appVersion()}"
 
         val filter = IntentFilter().apply {
             addAction(BleScanService.ACTION_LOG)
@@ -134,21 +141,23 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Copié !", Toast.LENGTH_SHORT).show()
         }
 
-        val stationCodeInput = findViewById<EditText>(R.id.stationCodeInput)
-        stationCodeInput.setText(
-            Prefs.get(this).getString(Prefs.KEY_STATION_CODE, null) ?: MeteocielFetcher.DEFAULT_STATION_CODE
-        )
+        stationCodeInput = findViewById(R.id.stationCodeInput)
+        stationCodeRow = findViewById(R.id.stationCodeRow)
+        stationCodeInput.setText(Prefs.getStationCode(this))
         findViewById<Button>(R.id.btnSaveStation).setOnClickListener {
             val code = stationCodeInput.text.toString().trim()
             if (code.isEmpty()) {
                 Toast.makeText(this, "Code de station vide", Toast.LENGTH_SHORT).show()
             } else {
-                Prefs.get(this).edit().putString(Prefs.KEY_STATION_CODE, code).apply()
+                Prefs.setStationCode(this, code)
                 appendLog("Station changée manuellement → $code")
                 Toast.makeText(this, "Station enregistrée : $code", Toast.LENGTH_SHORT).show()
+                refreshLocationButton()
+                showTemps()
                 if (hasPermissions()) WorkScheduler.runNow(this)
             }
         }
+        refreshStationRow()
 
         // Démarrage automatique — pas besoin que l'utilisateur appuie sur quoi que ce soit
         if (hasPermissions()) {
@@ -189,17 +198,76 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTemps() {
         val prefs = Prefs.get(this)
-        val indoor = prefs.getFloat(Prefs.KEY_INDOOR, Float.NaN)
-        val outdoor = prefs.getFloat(Prefs.KEY_OUTDOOR, Float.NaN)
+        val indoor = Prefs.getIndoor(this)
+        val outdoor = Prefs.getOutdoor(this)
         val state = prefs.getString(Prefs.KEY_LAST_STATE, Prefs.STATE_NONE)
-        val indoorStr = if (indoor.isNaN()) "--" else "%.1f°C".format(indoor)
-        val outdoorStr = if (outdoor.isNaN()) "--" else "%.1f°C".format(outdoor)
+        val indoorStr = describe(indoor, Reading.MAX_AGE_INDOOR_MS)
+        val outdoorStr = describe(outdoor, Reading.MAX_AGE_OUTDOOR_MS)
         val advice = when (state) {
             Prefs.STATE_OPEN  -> " · ↑ Ouvrir"
             Prefs.STATE_CLOSE -> " · ↓ Fermer"
             else -> ""
         }
-        setStatus("$indoorStr dedans · $outdoorStr dehors$advice", "#1565C0")
+        val stale = listOfNotNull(
+            indoor?.isFresh(Reading.MAX_AGE_INDOOR_MS),
+            outdoor?.isFresh(Reading.MAX_AGE_OUTDOOR_MS),
+        ).any { !it }
+        setStatus(
+            "$indoorStr dedans · $outdoorStr ${Prefs.getLocation(this).label}$advice",
+            if (stale) "#616161" else "#1565C0",
+        )
+    }
+
+    /** "21.4°C" si la mesure est d'actualité, "21.4°C (il y a 4 h 10)" sinon. */
+    private fun describe(reading: Reading?, maxAgeMs: Long): String = when {
+        reading == null -> "--"
+        reading.isFresh(maxAgeMs) -> "%.1f°C".format(reading.value)
+        else -> "%.1f°C (%s)".format(reading.value, Reading.formatAge(reading.ageMs()))
+    }
+
+    private fun refreshLocationButton() {
+        val loc = Prefs.getLocation(this)
+        locationButton.text = "Lieu : ${loc.label}  (${loc.sourceLabel(this)})"
+    }
+
+    /** Le code de station ne concerne que Meteociel : inutile de l'afficher pour Cordovado. */
+    private fun refreshStationRow() {
+        stationCodeRow.visibility =
+            if (Prefs.getLocation(this).usesStationCode) android.view.View.VISIBLE
+            else android.view.View.GONE
+    }
+
+    /** Sans ça, impossible de savoir quelle build tourne sur le téléphone. */
+    private fun appVersion(): String = try {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        "v${info.versionName}"
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun showLocationPicker() {
+        val options = WeatherLocation.entries
+        val current = Prefs.getLocation(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Température extérieure")
+            .setSingleChoiceItems(
+                options.map { "${it.label}\n${it.sourceLabel(this)}" }.toTypedArray(),
+                options.indexOf(current)
+            ) { dialog, which ->
+                dialog.dismiss()
+                val chosen = options[which]
+                if (chosen != current) {
+                    Prefs.setLocation(this, chosen)
+                    appendLog("Lieu → ${chosen.label} (${chosen.sourceLabel(this)})")
+                    refreshLocationButton()
+                    refreshStationRow()
+                    showTemps()
+                    TemperatureWidgetProvider.updateAll(this)
+                    if (hasPermissions()) WorkScheduler.runNow(this)
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
     }
 
     private fun requestPermsOrSettings() {
